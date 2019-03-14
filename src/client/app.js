@@ -4,6 +4,9 @@
 
 const glov_local_storage = require('./glov/local_storage.js');
 const particle_data = require('./particle_data.js');
+const fs = require('fs');
+
+const { floor, random, min } = Math;
 
 glov_local_storage.storage_prefix = 'glovjs-playground';
 window.Z = window.Z || {};
@@ -14,13 +17,29 @@ Z.UI_TEST = 200;
 
 // let app = exports;
 // Virtual viewport for our game logic
-export const game_width = 320;
-export const game_height = 240;
+export const game_width = 720;
+export const game_height = 400;
 
 export let sprites = {};
 
+let ansi_files = [
+  fs.readFileSync(`${__dirname}/ans/data0.ans`, 'binary'),
+  fs.readFileSync(`${__dirname}/ans/data5.ans`, 'binary'),
+  fs.readFileSync(`${__dirname}/ans/data1.ans`, 'binary'),
+  fs.readFileSync(`${__dirname}/ans/data4.ans`, 'binary'),
+  fs.readFileSync(`${__dirname}/ans/data2.ans`, 'binary'),
+  fs.readFileSync(`${__dirname}/ans/data6.ans`, 'binary'),
+  fs.readFileSync(`${__dirname}/ans/data7.ans`, 'binary'),
+  fs.readFileSync(`${__dirname}/ans/data3.ans`, 'binary'),
+  fs.readFileSync(`${__dirname}/ans/data8.ans`, 'binary'),
+  fs.readFileSync(`${__dirname}/ans/animated.ans`, 'binary'),
+];
+
+
 // Persistent flags system for testing parameters
 let flags = {};
+flags.pixely = 'strict'; // donotcheckin
+flags.music = false;
 function flagGet(key, dflt) {
   if (flags[key] === undefined) {
     flags[key] = glov_local_storage.getJSON(`flag_${key}`, dflt) || false;
@@ -41,6 +60,7 @@ export function main(canvas) {
   const glov_font = require('./glov/font.js');
   const glov_ui_test = require('./glov/ui_test.js');
   const glov_transition = require('./glov/transition.js');
+  const glov_terminal = require('./glov/terminal.js');
 
   glov_engine.startup({
     canvas,
@@ -48,6 +68,12 @@ export function main(canvas) {
     game_height,
     pixely: flagGet('pixely', 'strict'),
     viewport_postprocess: true,
+    font: {
+      info: require('./img/font/vga_16x2.json'),
+      texture: 'font/vga_16x2.png',
+    },
+    pixel_aspect: (640/480) / (720 / 400),
+    show_fps: false,
   });
 
   const sound_manager = glov_engine.sound_manager;
@@ -56,11 +82,12 @@ export function main(canvas) {
   const glov_sprite = glov_engine.glov_sprite;
   const glov_ui = glov_engine.glov_ui;
   const draw_list = glov_engine.draw_list;
+  const terminal = glov_terminal.create();
   // const font = glov_engine.font;
 
   // Perfect sizes for pixely modes
   glov_ui.scaleSizes(13 / 32);
-  glov_ui.font_height = 8;
+  glov_ui.font_height = 16;
 
   const createSpriteSimple = glov_sprite.createSpriteSimple.bind(glov_sprite);
   const createAnimation = glov_sprite.createAnimation.bind(glov_sprite);
@@ -75,26 +102,29 @@ export function main(canvas) {
 
   const sprite_size = 64;
   function initGraphics() {
-    glov_sprite.preloadParticleData(particle_data);
-
-    sound_manager.loadSound('test');
+    if (0) {
+      glov_sprite.preloadParticleData(particle_data);
+      sound_manager.loadSound('test');
+    }
 
     const origin_0_0 = glov_sprite.origin_0_0;
 
     sprites.white = createSpriteSimple('white', 1, 1, origin_0_0);
 
-    sprites.test_tint = createSpriteSimple('tinted', [16, 16, 16, 16], [16, 16, 16], { layers: 2 });
-    sprites.animation = createAnimation({
-      idle_left: {
-        frames: [0,1],
-        times: [200, 500],
-      },
-      idle_right: {
-        frames: [3,2],
-        times: [200, 500],
-      },
-    });
-    sprites.animation.setState('idle_left');
+    if (0) {
+      sprites.test_tint = createSpriteSimple('tinted', [16, 16, 16, 16], [16, 16, 16], { layers: 2 });
+      sprites.animation = createAnimation({
+        idle_left: {
+          frames: [0,1],
+          times: [200, 500],
+        },
+        idle_right: {
+          frames: [3,2],
+          times: [200, 500],
+        },
+      });
+      sprites.animation.setState('idle_left');
+    }
 
     sprites.game_bg = createSpriteSimple('white', 2, 2, {
       width: game_width,
@@ -105,15 +135,18 @@ export function main(canvas) {
 
   let last_particles = 0;
 
+  let auto_advance = true;
+
   function test(dt) {
     if (!test.color_sprite) {
       test.color_sprite = VMath.v4Copy(color_white);
       test.character = {
-        x: (Math.random() * (game_width - sprite_size) + (sprite_size * 0.5)),
-        y: (Math.random() * (game_height - sprite_size) + (sprite_size * 0.5)),
+        x: (random() * (game_width - sprite_size) + (sprite_size * 0.5)),
+        y: (random() * (game_height - sprite_size) + (sprite_size * 0.5)),
       };
     }
 
+    if (0) {
     if (flagGet('ui_test')) {
       // let clip_test = 30;
       // draw_list.clip(Z.UI_TEST - 10, Z.UI_TEST + 10, clip_test, clip_test, 320-clip_test * 2, 240-clip_test * 2);
@@ -250,10 +283,81 @@ export function main(canvas) {
         last_particles = glov_engine.getFrameTimestamp();
         glov_engine.glov_particles.createSystem(particle_data.defs.explosion,
           //[test.character.x, test.character.y, Z.PARTICLES]
-          [100 + Math.random() * 120, 100 + Math.random() * 140, Z.PARTICLES]
+          [100 + random() * 120, 100 + random() * 140, Z.PARTICLES]
         );
       }
     }
+    }
+
+    if (glov_input.keyDownHit(key_codes.LEFT)) {
+      auto_advance = false;
+      test.terminal_countdown = 0;
+      test.term_idx--;
+    }
+    if (glov_input.keyDownHit(key_codes.RIGHT)) {
+      auto_advance = false;
+      test.terminal_countdown = 0;
+      test.term_idx++;
+    }
+    terminal.baud = glov_input.isKeyDown(key_codes.SPACE) ? 1000000000 : 9600;
+    if (!test.terminal_countdown || dt >= test.terminal_countdown) {
+      if (auto_advance) {
+        test.term_idx = (test.term_idx || 0) + 1;
+      }
+      if (test.term_idx > ansi_files.length || test.term_idx <= 0) {
+        // random fill
+        if (!test.terminal_inited) {
+          test.terminal_inited = true;
+          // randomish fill
+          terminal.autoScroll(false);
+          terminal.moveto(0,0);
+          function getch(ii, jj) { //eslint-disable-line no-inner-declarations
+            return 176 + floor(random() * (224-176));
+            // return 32 + ((ii * 7 + jj) % (255 - 32));
+          }
+          for (let ii = 0; ii < 25; ++ii) {
+            let str = [ii === 0 ? '╓' : ii === 24 ? '╚' : '║']; // ║╓─╖╚═╝
+            for (let jj = 1; jj < 79; ++jj) {
+              if (ii === 0) {
+                str.push('─');
+              } else if (ii === 24) {
+                str.push('═');
+              } else {
+                str.push(getch(ii, jj));
+              }
+            }
+            str.push(ii === 0 ? '╖' : ii === 24 ? '╝' : '║');
+            terminal.print({ x: 0, y: ii, text: str, fg: 8, bg: 0 });
+          }
+          terminal.moveto(0, 0);
+        }
+
+        terminal.color(floor(random() * 16), floor(random() * 8));
+        let x = 1 + floor(random() * 78);
+        let y = 1 + floor(random() * 23);
+        terminal.fill({
+          x,
+          y,
+          w: min(79 - x, 1 + floor(random() * 10)),
+          h: min(24 - y, 1 + floor(random() * 8)),
+          ch: 32 + floor(random() * (255 - 32)),
+        });
+        test.terminal_countdown = 100;
+      } else {
+        // scroll through ansi files
+        terminal.color(7,0);
+        terminal.clear();
+        let data = ansi_files[test.term_idx - 1];
+        terminal.print({ x: 0, y: 0, text: data });
+        test.terminal_countdown = 1500;
+      }
+    } else {
+      test.terminal_countdown -= dt;
+    }
+
+    terminal.render(dt, {
+      z: Z.BACKGROUND + 1,
+    });
 
     // Debugging touch state on mobile
     // const glov_camera = glov_engine.glov_camera;
