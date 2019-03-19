@@ -38,7 +38,7 @@ let ansi_files = [
 
 // Persistent flags system for testing parameters
 let flags = {};
-flags.pixely = 'strict'; // donotcheckin
+flags.pixely = 'strict';
 flags.music = false;
 function flagGet(key, dflt) {
   if (flags[key] === undefined) {
@@ -69,8 +69,8 @@ export function main(canvas) {
     pixely: flagGet('pixely', 'strict'),
     viewport_postprocess: true,
     font: {
-      info: require('./img/font/vga_16x2.json'),
-      texture: 'font/vga_16x2.png',
+      info: require('./img/font/vga_16x1.json'),
+      texture: 'font/vga_16x1.png',
     },
     pixel_aspect: (640/480) / (720 / 400),
     show_fps: false,
@@ -136,6 +136,8 @@ export function main(canvas) {
   let last_particles = 0;
 
   let auto_advance = true;
+  let term_idx = 0;
+  let terminal_countdown = 0;
 
   function test(dt) {
     if (!test.color_sprite) {
@@ -146,165 +148,25 @@ export function main(canvas) {
       };
     }
 
-    if (0) {
-    if (flagGet('ui_test')) {
-      // let clip_test = 30;
-      // draw_list.clip(Z.UI_TEST - 10, Z.UI_TEST + 10, clip_test, clip_test, 320-clip_test * 2, 240-clip_test * 2);
-      glov_ui_test.run(10, 10, Z.UI_TEST);
-    }
-    if (flagGet('font_test')) {
-      glov_ui_test.runFontTest(105, 85);
-    }
-
-    test.character.dx = 0;
-    test.character.dy = 0;
-    if (glov_input.isKeyDown(key_codes.LEFT) || glov_input.isKeyDown(key_codes.A) ||
-      glov_input.isPadButtonDown(pad_codes.LEFT)
-    ) {
-      test.character.dx = -1;
-      sprites.animation.setState('idle_left');
-    } else if (glov_input.isKeyDown(key_codes.RIGHT) || glov_input.isKeyDown(key_codes.D) ||
-      glov_input.isPadButtonDown(pad_codes.RIGHT)
-    ) {
-      test.character.dx = 1;
-      sprites.animation.setState('idle_right');
-    }
-    if (glov_input.isKeyDown(key_codes.UP) || glov_input.isKeyDown(key_codes.W) ||
-      glov_input.isPadButtonDown(pad_codes.UP)
-    ) {
-      test.character.dy = -1;
-    } else if (glov_input.isKeyDown(key_codes.DOWN) || glov_input.isKeyDown(key_codes.S) ||
-      glov_input.isPadButtonDown(pad_codes.DOWN)
-    ) {
-      test.character.dy = 1;
-    }
-
-    test.character.x += test.character.dx * dt * 0.05;
-    test.character.y += test.character.dy * dt * 0.05;
-    let bounds = {
-      x: test.character.x - sprite_size/2,
-      y: test.character.y - sprite_size/2,
-      w: sprite_size,
-      h: sprite_size,
-    };
-    if (glov_input.isMouseDown() && glov_input.isMouseOver(bounds)) {
-      VMath.v4Copy(color_yellow, test.color_sprite);
-    } else if (glov_input.clickHit(bounds)) {
-      VMath.v4Copy((test.color_sprite[2] === 0) ? color_white : color_red, test.color_sprite);
-      sound_manager.play('test');
-    } else if (glov_input.isMouseOver(bounds)) {
-      VMath.v4Copy(color_white, test.color_sprite);
-      test.color_sprite[3] = 0.5;
-    } else {
-      VMath.v4Copy(color_white, test.color_sprite);
-      test.color_sprite[3] = 1;
-    }
-
-    draw_list.queue(sprites.game_bg, 0, 0, Z.BACKGROUND, [0, 0.72, 1, 1]);
-    sprites.test_tint.drawDualTint({
-      x: test.character.x,
-      y: test.character.y,
-      z: Z.SPRITES,
-      color: [1, 1, 0, 1],
-      color1: [1, 0, 1, 1],
-      size: [sprite_size, sprite_size],
-      frame: sprites.animation.getFrame(dt),
-    });
-
-    let font_test_idx = 0;
-
-    glov_ui.print(glov_font.styleColored(null, 0x000000ff),
-      test.character.x, test.character.y + (++font_test_idx * 20), Z.SPRITES,
-      'TEXT!');
-    let font_style = glov_font.style(null, {
-      outline_width: 1.0,
-      outline_color: 0x800000ff,
-      glow_xoffs: 3.25,
-      glow_yoffs: 3.25,
-      glow_inner: -2.5,
-      glow_outer: 5,
-      glow_color: 0x000000ff,
-    });
-    glov_ui.print(font_style,
-      test.character.x, test.character.y + (++font_test_idx * glov_ui.font_height), Z.SPRITES,
-      'Outline and Drop Shadow');
-
-    let x = glov_ui.button_height;
-    let button_spacing = glov_ui.button_height + 2;
-    let y = game_height - 10 - button_spacing * 5;
-    if (glov_ui.buttonText({ x, y, text: `Pixely: ${flagGet('pixely') || 'Off'}`,
-      tooltip: 'Toggles pixely or regular mode (requires reload)' })
-    ) {
-      if (flagGet('pixely') === 'strict') {
-        flagSet('pixely', false);
-      } else if (flagGet('pixely') === 'on') {
-        flagSet('pixely', 'strict');
-      } else {
-        flagSet('pixely', 'on');
-      }
-      document.location = String(document.location);
-    }
-    y += button_spacing;
-
-    if (glov_ui.buttonText({ x, y, text: `Music: ${flagGet('music') ? 'ON' : 'OFF'}`,
-      tooltip: 'Toggles playing a looping background music track' })
-    ) {
-      flagToggle('music');
-      if (flagGet('music')) {
-        sound_manager.playMusic('music_test.mp3', 1, sound_manager.FADE_IN);
-      } else {
-        sound_manager.playMusic('music_test.mp3', 0, sound_manager.FADE_OUT);
-      }
-    }
-    y += button_spacing;
-
-    if (glov_ui.buttonText({ x, y, text: `Font Test: ${flagGet('font_test') ? 'ON' : 'OFF'}`,
-      tooltip: 'Toggles visibility of general Font tests' })
-    ) {
-      flagToggle('font_test');
-      glov_transition.queue(Z.TRANSITION_FINAL, glov_transition.randomTransition());
-    }
-    y += button_spacing;
-
-    if (glov_ui.buttonText({ x, y, text: `UI Test: ${flagGet('ui_test') ? 'ON' : 'OFF'}`,
-      tooltip: 'Toggles visibility of general UI tests' })
-    ) {
-      flagToggle('ui_test');
-    }
-    y += button_spacing;
-
-    if (glov_ui.buttonText({ x, y, text: `Particles: ${flagGet('particles', true) ? 'ON' : 'OFF'}`,
-      tooltip: 'Toggles particles' })
-    ) {
-      flagToggle('particles');
-    }
-    if (flagGet('particles')) {
-      if (glov_engine.getFrameTimestamp() - last_particles > 1000) {
-        last_particles = glov_engine.getFrameTimestamp();
-        glov_engine.glov_particles.createSystem(particle_data.defs.explosion,
-          //[test.character.x, test.character.y, Z.PARTICLES]
-          [100 + random() * 120, 100 + random() * 140, Z.PARTICLES]
-        );
-      }
-    }
-    }
-
     if (glov_input.keyDownHit(key_codes.LEFT)) {
       auto_advance = false;
-      test.terminal_countdown = 0;
-      test.term_idx--;
+      terminal_countdown = 0;
+      term_idx--;
     }
     if (glov_input.keyDownHit(key_codes.RIGHT)) {
       auto_advance = false;
-      test.terminal_countdown = 0;
-      test.term_idx++;
+      terminal_countdown = 0;
+      term_idx++;
     }
-    terminal.baud = glov_input.isKeyDown(key_codes.SPACE) ? 1000000000 : 9600;
-    if (!test.terminal_countdown || dt >= test.terminal_countdown) {
-      if (auto_advance) {
-        test.term_idx = (test.term_idx || 0) + 1;
+    terminal.baud = glov_input.isKeyDown(key_codes.SPACE) ? Infinity : 9600;
+    if (!terminal_countdown || dt >= terminal_countdown) {
+      if (term_idx === undefined) {
+        term_idx = 0;
       }
-      if (test.term_idx > ansi_files.length || test.term_idx <= 0) {
+      if (auto_advance) {
+        term_idx = min((term_idx || 0), ansi_files.length) + 1;
+      }
+      if (term_idx > ansi_files.length || term_idx <= 0) {
         // random fill
         if (!test.terminal_inited) {
           test.terminal_inited = true;
@@ -342,17 +204,17 @@ export function main(canvas) {
           h: min(24 - y, 1 + floor(random() * 8)),
           ch: 32 + floor(random() * (255 - 32)),
         });
-        test.terminal_countdown = 100;
+        terminal_countdown = 100;
       } else {
         // scroll through ansi files
         terminal.color(7,0);
         terminal.clear();
-        let data = ansi_files[test.term_idx - 1];
+        let data = ansi_files[term_idx - 1];
         terminal.print({ x: 0, y: 0, text: data });
-        test.terminal_countdown = 1500;
+        terminal_countdown = auto_advance ? 1500 : 1000000000;
       }
     } else {
-      test.terminal_countdown -= dt;
+      terminal_countdown -= dt;
     }
 
     terminal.render(dt, {
