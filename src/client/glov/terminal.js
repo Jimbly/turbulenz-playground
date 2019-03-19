@@ -481,6 +481,9 @@ class GlovTerminal {
       let next = mod.next;
       if (next) {
         let ms_per_char = 1000 / (this.baud / 10); // 10 bits per byte
+        if (!isFinite(ms_per_char)) {
+          ms_per_char = 0;
+        }
         this.mod_countdown = ms_per_char * this.ansiCharsTo(next);
       } else {
         this.mod_countdown = 0;

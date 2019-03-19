@@ -583,8 +583,8 @@ var WebGLTurbulenzEngine = (function () {
                     // JE: Add scale by window.devicePixelRatio to get device pixels on mobile
                     var css_to_real = window.devicePixelRatio || 1;
 
-                    canvas.width = Math.floor(parentNode.clientWidth * css_to_real);
-                    canvas.height = Math.floor(parentNode.clientHeight * css_to_real);
+                    canvas.width = Math.round(parentNode.clientWidth * css_to_real);
+                    canvas.height = Math.round(parentNode.clientHeight * css_to_real);
                 }
             };
 
