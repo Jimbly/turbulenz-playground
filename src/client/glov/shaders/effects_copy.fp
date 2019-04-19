@@ -1,13 +1,12 @@
-#ifdef GL_ES
-#define TZ_LOWP lowp
+#pragma WebGL
+
 precision highp float;
 precision highp int;
-#else
-#define TZ_LOWP
-#endif
-varying vec4 tz_TexCoord[1];
+
+varying vec2 interp_texcoord;
+
 uniform sampler2D inputTexture0;
 void main()
 {
-  gl_FragColor = texture2D(inputTexture0, tz_TexCoord[0].xy);
+  gl_FragColor = texture2D(inputTexture0, interp_texcoord);
 }

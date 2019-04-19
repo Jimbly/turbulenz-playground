@@ -8,7 +8,7 @@
 let def_fire = {
   particles: {
     fire: {
-      bucket: 'additive',
+      blend: 'additive',
       texture: 'fire.png',
       color: [1,1,1,1], // multiplied by animation track, default 1,1,1,1, can be omitted
       color_track: [ // just values, NOT random range
@@ -56,18 +56,38 @@ system.killHard(); // immediately stops drawing
 
 //////////////////////////////////////////////////////////////////////////
 // Implementation
-/*global assert: false */
-/*global VMath: false */
+
+const assert = require('assert');
+const sprites = require('./sprites.js');
+const textures = require('./textures.js');
+const { vec2, v2copy, v2lerp, v2mul } = require('./vmath.js');
+const { vec3, vec4, v3add, v4copy, v4lerp, v4mul } = require('./vmath.js');
+
+const blend_map = {
+  alpha: sprites.BLEND_ALPHA,
+  additive: sprites.BLEND_ADDITIVE,
+};
+
+export function preloadParticleData(particle_data) {
+  // Preload all referenced particle textures
+  for (let key in particle_data.defs) {
+    let def = particle_data.defs[key];
+    for (let part_name in def.particles) {
+      let part_def = def.particles[part_name];
+      textures.load({ url: `img/${part_def.texture}.png` });
+    }
+  }
+}
 
 // Expect all values to be a pair of [base, add_max]
 function normalizeValue(v) {
   if (v instanceof Float32Array && v.length >= 2) {
     return v;
   } else if (typeof v === 'number') {
-    return VMath.v2Build(v, 0);
+    return vec2(v, 0);
   } else if (Array.isArray(v) || v instanceof Float32Array) {
     // already an array, convert to Vec2
-    return VMath.v2Build(v[0] || 0, v[1] || 0);
+    return vec2(v[0] || 0, v[1] || 0);
   } else {
     return assert(false);
   }
@@ -86,8 +106,8 @@ function normalizeValueVec(vec, length) {
 function normalizeParticle(def, particle_manager) {
   if (!def.normalized) {
     let norm = def.normalized = {
-      bucket: def.bucket || 'alpha',
-      texture: particle_manager.glov_sprite.loadTexture(def.texture || 'img/glov/util_circle.png'),
+      blend: blend_map[def.blend] || sprites.BLEND_ALPHA,
+      texture: textures.load({ url: def.texture ? `img/${def.texture}.png` : 'img/glov/util_circle.png' }),
       color: normalizeValueVec(def.color || [1,1,1,1], 4),
       color_track: null,
       size: normalizeValueVec(def.size || [1,1], 2),
@@ -186,11 +206,11 @@ function instValueVec(v) {
   return ret;
 }
 
-let temp_color = VMath.v4BuildZero();
-let temp_color2 = VMath.v4BuildZero();
-let temp_size = VMath.v2BuildZero();
-let temp_size2 = VMath.v2BuildZero();
-// let temp_pos = VMath.v3BuildZero();
+let temp_color = vec4();
+let temp_color2 = vec4();
+let temp_size = vec2();
+let temp_size2 = vec2();
+// let temp_pos = v3allocZero();
 
 class ParticleSystem {
   constructor(parent, def_in, pos) {
@@ -202,7 +222,7 @@ class ParticleSystem {
     this.age = 0;
     this.kill_hard = false;
     this.kill_soft = false;
-    this.pos = VMath.v3Build(pos[0], pos[1], pos[2]);
+    this.pos = vec3(pos[0], pos[1], pos[2]);
     this.part_sets = [];
     for (let ii = 0; ii < this.def.particles.length; ++ii) {
       let def = this.def.particles[ii];
@@ -229,7 +249,7 @@ class ParticleSystem {
     this.tick(0);
   }
 
-  tickParticle(part, dt) {
+  tickParticle(part, dt) { // eslint-disable-line class-methods-use-this
     let def = part.def;
     part.age += dt;
     let age_norm = part.age / part.lifespan;
@@ -247,36 +267,36 @@ class ParticleSystem {
     part.vel[2] += part.accel[2] * dts;
 
     // Color, size, rot - explicitly computed
-    VMath.v4Copy(part.color, temp_color);
+    v4copy(temp_color, part.color, temp_color);
     if (def.color_track) {
       if (age_norm < def.color_track[0][4]) {
-        VMath.v4Mul(temp_color, def.color_track[0], temp_color);
+        v4mul(temp_color, temp_color, def.color_track[0]);
       } else if (age_norm >= def.color_track[def.color_track.length - 1][4]) {
-        VMath.v4Mul(temp_color, def.color_track[def.color_track.length - 1], temp_color);
+        v4mul(temp_color, temp_color, def.color_track[def.color_track.length - 1]);
       } else {
         for (let ii = 0; ii < def.color_track.length - 1; ++ii) {
           if (age_norm >= def.color_track[ii][4] && age_norm < def.color_track[ii + 1][4]) {
             let weight = (age_norm - def.color_track[ii][4]) / (def.color_track[ii + 1][4] - def.color_track[ii][4]);
-            VMath.v4Lerp(def.color_track[ii], def.color_track[ii + 1], weight, temp_color2);
-            VMath.v4Mul(temp_color, temp_color2, temp_color);
+            v4lerp(temp_color2, weight, def.color_track[ii], def.color_track[ii + 1]);
+            v4mul(temp_color, temp_color, temp_color2);
             break;
           }
         }
       }
     }
 
-    VMath.v2Copy(part.size, temp_size);
+    v2copy(temp_size, part.size);
     if (def.size_track) {
       if (age_norm < def.size_track[0][4]) {
-        VMath.v2Mul(temp_size, def.size_track[0], temp_size);
+        v2mul(temp_size, temp_size, def.size_track[0]);
       } else if (age_norm >= def.size_track[def.size_track.length - 1][4]) {
-        VMath.v2Mul(temp_size, def.size_track[def.size_track.length - 1], temp_size);
+        v2mul(temp_size, temp_size, def.size_track[def.size_track.length - 1]);
       } else {
         for (let ii = 0; ii < def.size_track.length - 1; ++ii) {
           if (age_norm >= def.size_track[ii][4] && age_norm < def.size_track[ii + 1][4]) {
             let weight = (age_norm - def.size_track[ii][4]) / (def.size_track[ii + 1][4] - def.size_track[ii][4]);
-            VMath.v2Lerp(def.size_track[ii], def.size_track[ii + 1], weight, temp_size2);
-            VMath.v2Mul(temp_size, temp_size2, temp_size);
+            v2lerp(temp_size2, weight, def.size_track[ii], def.size_track[ii + 1]);
+            v2mul(temp_size, temp_size, temp_size2);
             break;
           }
         }
@@ -292,9 +312,9 @@ class ParticleSystem {
     let x = part.pos[0] - w/2;
     let y = part.pos[1] - h/2;
     let z = part.pos[2];
-    this.parent.draw_list.queueraw4(def.texture.texture,
-      x, y, x + w, y, x + w, y + h, x, y + h, z, 0, 0, 1, 1,
-      temp_color, def.bucket, null);
+    sprites.queueraw4([def.texture],
+      x, y, x, y + h, x + w, y + h, x + w, y, z, 0, 0, 1, 1,
+      temp_color, null, null, def.blend);
 
     return false;
   }
@@ -317,7 +337,7 @@ class ParticleSystem {
     let part_set = this.part_sets[emitter_def.part_idx];
     let def = part_set.def;
     let pos = instValueVec(emitter_def.pos, 3);
-    VMath.v3Add(pos, this.pos, pos);
+    v3add(pos, pos, this.pos);
     // PERFTODO: Make the whole Particle just a data[] Float32Array
     let part = {
       def,
@@ -389,9 +409,7 @@ class ParticleSystem {
 }
 
 class ParticleManager {
-  constructor(draw_list, glov_sprite) {
-    this.draw_list = draw_list;
-    this.glov_sprite = glov_sprite;
+  constructor() {
     this.systems = [];
   }
 

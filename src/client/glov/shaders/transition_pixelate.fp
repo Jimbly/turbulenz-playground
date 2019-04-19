@@ -1,5 +1,8 @@
-varying vec4 tz_TexCoord[1];
-varying TZ_LOWP vec4 tz_Color;
+#pragma WebGL
+
+precision lowp float;
+
+varying highp vec2 interp_texcoord;
 
 uniform sampler2D tex0;
 uniform vec4 param0;
@@ -7,7 +10,7 @@ uniform vec4 param1;
 
 void main(void)
 {
-  vec2 interp_uvs = tz_TexCoord[0].xy;
+  vec2 interp_uvs = interp_texcoord;
   // TODO: for best look, should generate an appropriate mipmap and sample from that/just render it w/ nearest neighbor
   // result = texture2D(tex0, min(floor(interp_uvs.xy * param0.xy + 0.5) * param0.zw - param1.xy, param1.zw) );
 

@@ -1,16 +1,17 @@
-/* global Z, VMath */
+/* global Z */
 
 const assert = require('assert');
-const fs = require('fs');
+const camera2d = require('./camera2d.js');
 const glov_engine = require('./engine.js');
+const fs = require('fs');
+const sprites = require('./sprites.js');
+const shaders = require('./shaders.js');
+const textures = require('./textures.js');
+const glov_ui = require('./ui.js');
 
 const { easeOut } = require('../../common/util.js');
-const { v4Build } = VMath;
+const { unit_vec, vec4 } = require('./vmath.js');
 const { floor, min, pow, random } = Math;
-
-let draw_list;
-let glov_ui;
-let glov_camera;
 
 let transitions = [];
 
@@ -19,18 +20,18 @@ export const IMMEDIATE = 'immediate';
 export const REMOVE = 'remove';
 export const CONTINUE = 'continue';
 
-const shaders = {
+const shader_data = {
   transition_pixelate: {
     fp: fs.readFileSync(`${__dirname}/shaders/transition_pixelate.fp`, 'utf8'),
   },
 };
 
-export function populateDraw2DParams(params) {
-  params.shaders = params.shaders || {};
-  for (let name in shaders) {
-    assert(!params.shaders[name]);
-    params.shaders[name] = shaders[name];
+function getShader(key) {
+  let elem = shader_data[key];
+  if (!elem.shader) {
+    elem.shader = shaders.create(gl.FRAGMENT_SHADER, elem.fp);
   }
+  return elem.shader;
 }
 
 class GlovTransition {
@@ -44,16 +45,11 @@ class GlovTransition {
 
 function transitionCapture(trans) {
   assert(!trans.capture);
-  trans.capture = glov_engine.getTextureForCapture();
+  trans.capture = textures.createForCapture();
   glov_engine.captureFramebuffer(trans.capture);
 }
 
 export function queue(z, fn) {
-  if (!glov_camera) {
-    glov_camera = glov_engine.glov_camera;
-    glov_ui = glov_engine.glov_ui;
-    draw_list = glov_engine.draw_list;
-  }
   let immediate = false;
   if (z === IMMEDIATE) {
     immediate = true;
@@ -91,14 +87,14 @@ export function render(dt) {
     trans.accum_time += dt;
     if (!trans.capture) {
       // queue up a capture past the specified Z, so transitions rendering at that Z (plus a handful) get captured
-      draw_list.queuefn(trans.z + Z.TRANSITION_RANGE, transitionCapture.bind(null, trans));
+      sprites.queuefn(trans.z + Z.TRANSITION_RANGE, transitionCapture.bind(null, trans));
     } else if (trans.capture) {
       // call the function and give them the Z
       // If not the last one, want it to end now!
       let force_end = trans_idx < transitions.length - 1;
       let ret = trans.func(trans.z, trans.capture, trans.accum_time, force_end);
       if (ret === REMOVE) {
-        setImmediate(destroyTexture.bind(null, trans.capture));
+        setTimeout(destroyTexture.bind(null, trans.capture), 0);
         transitions.splice(trans_idx, 1);
         trans_idx--;
       }
@@ -110,14 +106,14 @@ export function render(dt) {
 function glovTransitionFadeFunc(fade_time, z, initial, ms_since_start, force_end) {
   let progress = min(ms_since_start / fade_time, 1);
   let alpha = (1 - easeOut(progress, 2));
-  let color = v4Build(1, 1, 1, alpha);
-  glov_camera.set2DNormalized();
-  draw_list.queueraw4(initial,
-    0, 0, 1, 0,
-    1, 1, 0, 1,
+  let color = vec4(1, 1, 1, alpha);
+  camera2d.setNormalized();
+  sprites.queueraw4([initial],
+    0, 0, 0, 1,
+    1, 1, 1, 0,
     z,
     0, 1, 1, 0,
-    color, 'alpha_nearest');
+    color);
 
   if (force_end || progress === 1) {
     return REMOVE;
@@ -131,7 +127,7 @@ function glovTransitionFadeFunc(fade_time, z, initial, ms_since_start, force_end
 function glovTransitionWipeFunc(wipe_time, wipe_angle, z, tex, ms_since_start, force_end) {
   let progress = min(ms_since_start / wipe_time, 1);
 
-  glov_camera.set2DNormalized();
+  camera2d.setNormalized();
 
   let uvs = [[0,1], [1,0]];
 
@@ -212,12 +208,12 @@ function glovTransitionWipeFunc(wipe_time, wipe_angle, z, tex, ms_since_start, f
   points[2].v = lerp(points[2].y, uvs[0][1], uvs[1][1]);
   points[3].v = lerp(points[3].y, uvs[0][1], uvs[1][1]);
 
-  draw_list.queueraw4(tex,
-    points[0].x, points[0].y, points[1].x, points[1].y,
-    points[2].x, points[2].y, points[3].x, points[3].y,
+  sprites.queueraw4([tex],
+    points[0].x, points[0].y, points[3].x, points[3].y,
+    points[2].x, points[2].y, points[1].x, points[1].y,
     z,
     points[0].u, points[0].v, points[2].u, points[2].v,
-    draw_list.color_white, 'alpha_nearest');
+    unit_vec, 'alpha_nearest');
 
   if (force_end || progress === 1) {
     return REMOVE;
@@ -228,28 +224,28 @@ function glovTransitionWipeFunc(wipe_time, wipe_angle, z, tex, ms_since_start, f
 */
 
 function glovTransitionSplitScreenFunc(time, border_width, slide_window, z, tex, ms_since_start, force_end) {
-  let border_color = v4Build(1, 1, 1, 1);
+  let border_color = vec4(1, 1, 1, 1);
   let progress = easeOut(min(ms_since_start / time, 1), 2);
-  glov_camera.set2DNormalized();
+  camera2d.setNormalized();
 
   let uvs = [[0,1], [1,0]];
 
   let xoffs = progress;
   let v_half = uvs[0][1] + (uvs[1][1] - uvs[0][1]) / 2;
   if (slide_window) { // slide window
-    draw_list.queueraw(tex, 0, 0, z, 1 - xoffs, 1 / 2,
+    sprites.queueraw([tex], 0, 0, z, 1 - xoffs, 1 / 2,
       0, uvs[0][1], uvs[1][0] * (1 - progress), v_half,
-      draw_list.color_white, 0, 'alpha_nearest');
-    draw_list.queueraw(tex, 0 + xoffs, 1 / 2, z, 1 - xoffs, 1 / 2,
+      unit_vec);
+    sprites.queueraw([tex], 0 + xoffs, 1 / 2, z, 1 - xoffs, 1 / 2,
       uvs[1][0] * progress, v_half, uvs[1][0], uvs[1][1],
-      draw_list.color_white, 0, 'alpha_nearest');
+      unit_vec);
   } else { // slide image
-    draw_list.queueraw(tex, 0 - xoffs, 0, z, 1, 1 / 2,
+    sprites.queueraw([tex], 0 - xoffs, 0, z, 1, 1 / 2,
       uvs[0][0], uvs[0][1], uvs[1][0], v_half,
-      draw_list.color_white, 0, 'alpha_nearest');
-    draw_list.queueraw(tex, 0 + xoffs, 1 / 2, z, 1, 1 / 2,
+      unit_vec);
+    sprites.queueraw([tex], 0 + xoffs, 1 / 2, z, 1, 1 / 2,
       uvs[0][0], v_half, uvs[1][0], uvs[1][1],
-      draw_list.color_white, 0, 'alpha_nearest');
+      unit_vec);
   }
   let border_grow_progress = min(progress * 4, 1);
   border_color[3] = border_grow_progress;
@@ -272,20 +268,21 @@ let transition_pixelate_texture;
 
 function transitionPixelateCapture() {
   if (!transition_pixelate_texture) {
-    transition_pixelate_texture = glov_engine.getTextureForCapture();
+    transition_pixelate_texture = textures.createForCapture();
   }
   glov_engine.captureFramebuffer(transition_pixelate_texture);
 }
 
 function glovTransitionPixelateFunc(time, z, tex, ms_since_start, force_end) {
   //ms_since_start %= time;
-  let viewport = glov_engine.graphics_device.getViewport();
-  let gd_width = viewport[2];
+  //let viewport = glov_engine.graphics_device.getViewport();
+  //let gd_width = viewport[2];
+  let gd_width = glov_engine.width;
   let progress = min(ms_since_start / time, 1);
-  glov_camera.set2DNormalized();
+  camera2d.setNormalized();
 
   if (progress > 0.5) {
-    draw_list.queuefn(z, transitionPixelateCapture);
+    sprites.queuefn(z, transitionPixelateCapture);
     if (transition_pixelate_texture) {
       tex = transition_pixelate_texture;
     }
@@ -296,22 +293,21 @@ function glovTransitionPixelateFunc(time, z, tex, ms_since_start, force_end) {
   //  pixel is about the same percentage of the screen regardless of resolution.
   let pixel_scale = pow(2, floor(partial_progress * 8.9)) / 1024 * gd_width * render_scale;
 
-  let param0 = v4Build(tex.width / pixel_scale, tex.height / pixel_scale,
+  let param0 = vec4(tex.width / pixel_scale, tex.height / pixel_scale,
     pixel_scale / tex.width, pixel_scale / tex.height);
-  let param1 = v4Build(0.5 / tex.width, 0.5 / tex.height,
+  let param1 = vec4(0.5 / tex.width, 0.5 / tex.height,
     (tex.texSizeX - 1) / tex.width, (tex.texSizeY - 1) / tex.height);
 
 
-  draw_list.queueraw(tex, 0, 0, z + 1, 1, 1,
+  sprites.queueraw([tex], 0, 0, z + 1, 1, 1,
     0, 1, 1, 0,
-    draw_list.color_white, 0, 'transition_pixelate_nearest', {
-      clipSpace: draw_list.draw_2d.clipSpace,
+    unit_vec, getShader('transition_pixelate'), {
       param0,
       param1,
     });
 
   if (force_end || progress === 1) {
-    setImmediate(destroyTexture.bind(null, transition_pixelate_texture));
+    setTimeout(destroyTexture.bind(null, transition_pixelate_texture), 0);
     transition_pixelate_texture = null;
     return REMOVE;
   }
@@ -328,7 +324,7 @@ export function fade(fade_time) {
 
 // border_width in camera-relative size
 export function splitScreen(time, border_width, slide_window) {
-  border_width /= glov_engine.glov_camera.w(); // convert to normalized units
+  border_width /= camera2d.w(); // convert to normalized units
   return glovTransitionSplitScreenFunc.bind(null, time, border_width, slide_window);
 }
 

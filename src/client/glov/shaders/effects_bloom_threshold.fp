@@ -1,11 +1,9 @@
-#ifdef GL_ES
-#define TZ_LOWP lowp
+#pragma WebGL
+
 precision highp float;
 precision highp int;
-#else
-#define TZ_LOWP
-#endif
-varying vec4 tz_TexCoord[1];
+
+varying vec2 interp_texcoord;
 
 vec4 _ret_0;
 float _TMP1;
@@ -22,7 +20,7 @@ vec4 _col;
 float _luminance;
 float _x;
 float _cut;
-_col = texture2D(inputTexture0, tz_TexCoord[0].xy);
+_col = texture2D(inputTexture0, interp_texcoord);
 _luminance = dot(_col.xyz, vec3(2.12599993E-01, 7.15200007E-01, 7.22000003E-02));
 _x = float((_luminance >= bloomThreshold));
 _a0025 = 3.14159274 * (_luminance / bloomThreshold - 0.5);

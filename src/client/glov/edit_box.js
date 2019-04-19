@@ -1,12 +1,11 @@
 /* eslint-env jquery */
 /*global Z: false */
 
-const glov_engine = require('./engine.js');
+const glov_input = require('./input.js');
+const glov_ui = require('./ui.js');
+const camera2d = require('./camera2d.js');
 
 const { focuslog } = require('./ui.js');
-
-let glov_input;
-let glov_ui;
 
 class GlovUIEditBox {
   constructor(params) {
@@ -41,7 +40,7 @@ class GlovUIEditBox {
   }
   setText(new_text) {
     if (this.input) {
-      this.input.val(new_text);
+      this.input.value = new_text;
     }
     this.text = new_text;
   }
@@ -52,8 +51,8 @@ class GlovUIEditBox {
   updateFocus() {
     if (this.got_focus_out) {
       if (glov_ui.isFocusedPeek(this)) {
-        glov_input.keyDownHit(glov_input.key_codes.TAB); // eat the TAB
-        if (glov_input.isKeyDown(glov_input.key_codes.SHIFT)) {
+        glov_input.keyDownEdge(glov_input.KEYS.TAB); // eat the TAB
+        if (glov_input.keyDown(glov_input.KEYS.SHIFT)) {
           glov_ui.focusPrev(this);
         } else {
           glov_ui.focusNext(this);
@@ -62,19 +61,19 @@ class GlovUIEditBox {
       this.got_focus_out = false;
     }
     if (this.got_focus_in) {
-      glov_input.keyDownHit(glov_input.key_codes.TAB); // eat the TAB
+      glov_input.keyDownEdge(glov_input.KEYS.TAB); // eat the TAB
       glov_ui.focusSteal(this);
       this.got_focus_in = false;
     }
     let focused = glov_ui.focusCheck(this);
-    if (focused && this.input && document.activeElement !== this.input[0]) {
+    if (focused && this.input && document.activeElement !== this.input) {
       this.input.focus();
     }
-    if (!focused && this.input && document.activeElement === this.input[0]) {
+    if (!focused && this.input && document.activeElement === this.input) {
       this.input.blur();
     }
 
-    if (focused && glov_input.keyDownHit(glov_input.key_codes.ESCAPE)) {
+    if (focused && glov_input.keyDownEdge(glov_input.KEYS.ESC)) {
       if (this.text) {
         this.setText('');
       } else {
@@ -93,25 +92,32 @@ class GlovUIEditBox {
     if (elem !== this.elem) {
       if (elem) {
         // new DOM element, initialize
-        elem.html('');
-        let form = $('<form></form>');
-        let input = $(`<input type="${this.type}" placeholder="${this.placeholder}" tabindex="2">`);
-        input.focusin(() => {
+        elem.textContent = '';
+        let form = document.createElement('form');
+        let input = document.createElement('input');
+        input.setAttribute('type', this.type);
+        input.setAttribute('placeholder', this.placeholder);
+        input.setAttribute('tabindex', 2);
+        input.addEventListener('focusin', (ev) => {
           focuslog('EditBox:focusin', this);
           this.got_focus_in = true;
-        });
-        input.focusout((ev) => {
+          ev.preventDefault();
+        }, true);
+        input.addEventListener('focusout', (ev) => {
           focuslog('EditBox:focusout', this);
           this.got_focus_out = true;
-        });
-        form.submit((ev) => {
+          ev.preventDefault();
+        }, true);
+        form.addEventListener('submit', (ev) => {
           ev.preventDefault();
           this.submitted = true;
-        });
-        form.append(input);
-        form.append($('<span tabindex="3"></span>'));
-        elem.append(form);
-        input.val(this.text);
+        }, true);
+        form.appendChild(input);
+        let span = document.createElement('span');
+        span.setAttribute('tabindex', 3);
+        form.appendChild(span);
+        elem.appendChild(form);
+        input.value = this.text;
         this.input = input;
         if (this.initial_focus) {
           input.focus();
@@ -123,15 +129,15 @@ class GlovUIEditBox {
       this.elem = elem;
     } else {
       if (this.input) {
-        this.text = this.input.val();
+        this.text = this.input.value;
       }
     }
     if (elem) {
-      let pos = glov_engine.glov_camera.htmlPos(this.x, this.y);
-      elem[0].style.left = `${pos[0]}%`;
-      elem[0].style.top = `${pos[1]}%`;
-      let size = glov_engine.glov_camera.htmlSize(this.w, this.h);
-      elem[0].style.width = `${size[0]}%`;
+      let pos = camera2d.htmlPos(this.x, this.y);
+      elem.style.left = `${pos[0]}%`;
+      elem.style.top = `${pos[1]}%`;
+      let size = camera2d.htmlSize(this.w, this.h);
+      elem.style.width = `${size[0]}%`;
     }
 
     if (focused) {
@@ -154,9 +160,5 @@ class GlovUIEditBox {
 GlovUIEditBox.prototype.SUBMIT = 'submit';
 
 export function create(params) {
-  if (!glov_ui) {
-    glov_ui = glov_engine.glov_ui;
-    glov_input = glov_engine.glov_input;
-  }
   return new GlovUIEditBox(params);
 }

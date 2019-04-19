@@ -14,6 +14,7 @@ const useref = require('gulp-useref');
 const uglify = require('gulp-uglify');
 // const node_inspector = require('gulp-node-inspector');
 const nodemon = require('gulp-nodemon');
+const replace = require('gulp-replace');
 const source = require('vinyl-source-stream');
 const sourcemaps = require('gulp-sourcemaps');
 const watchify = require('watchify');
@@ -95,7 +96,7 @@ gulp.task('client_static', function () {
 // Fork of https://github.com/Jam3/brfs-babel that adds bablerc:false
 const babel_core = require('babel-core');
 const through = require('through2');
-const bable_static_fs = require('babel-plugin-static-fs');
+const babel_static_fs = require('babel-plugin-static-fs');
 function babelBrfs(filename, opts) {
   let input = '';
   if ((/\.json$/iu).test(filename)) {
@@ -113,7 +114,7 @@ function babelBrfs(filename, opts) {
       result = babel_core.transform(input, {
         plugins: [
           [
-            bable_static_fs, {
+            babel_static_fs, {
               // ensure static-fs files are discovered
               onFile: this.emit.bind(this, 'file')
             }
@@ -140,6 +141,12 @@ function babelBrfs(filename, opts) {
     entries: ['./src/client/wrapper.js'],
     cache: {}, // required for watchify
     packageCache: {}, // required for watchify
+    builtins: {
+      // super-simple replacements, if needed
+      assert: './src/client/shims/assert.js',
+      buffer: './src/client/shims/buffer.js',
+      // timers: './src/client/shims/timers.js',
+    },
     debug: true,
     transform: [babelBrfs]
   };
@@ -152,6 +159,10 @@ function babelBrfs(filename, opts) {
     //   // ['static-fs', {}], - generates good code, but does not allow reloading/watchify
     // ],
   };
+  function whitespaceReplace(a) {
+    // gulp-replace-with-sourcemaps doens't seem to work, so just replace with exactly matching whitespace
+    return a.replace(/[^\n\r]/gu, ' ');
+  }
   function dobundle(b, uglify_options) {
     return b
       //.transform(babelify, babelify_opts)
@@ -161,8 +172,12 @@ function babelBrfs(filename, opts) {
       .pipe(source('wrapper.bundle.js'))
       // optional, remove if you don't need to buffer file contents
       .pipe(buffer())
-      // optional, remove if you dont want sourcemaps
+      // optional, remove if you don't want sourcemaps
       .pipe(sourcemaps.init({ loadMaps: true })) // loads map from browserify file
+      // Remove extra Babel stuff that does not help anything
+      .pipe(replace(/_classCallCheck\([^)]+\);|exports\.__esModule = true;/gu, whitespaceReplace))
+      .pipe(replace(/function _classCallCheck\((?:[^}]*\}){2}/gu, whitespaceReplace))
+      .pipe(replace(/Object\.defineProperty\(exports, "__esModule"[^}]+\}\);/gu, whitespaceReplace))
       // Add transformation tasks to the pipeline here.
       .pipe(uglify(uglify_options))
       .pipe(sourcemaps.write('./')) // writes .map file

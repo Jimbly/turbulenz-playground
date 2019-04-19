@@ -4967,9 +4967,9 @@ VMath.F32Array = Float32Array;
 // If the plugin has a 'getNativeMathDevice' method then VMath should
 // replace the standard MathDevice.
 // WebWorkers can import vmath without a TurbulenzEngine variable defined
-if (typeof TurbulenzEngine !== 'undefined' && TurbulenzEngine.hasOwnProperty('VMath')) {
-    TurbulenzEngine.VMath = VMath;
-}
+// if (typeof TurbulenzEngine !== 'undefined' && TurbulenzEngine.hasOwnProperty('VMath')) {
+//     TurbulenzEngine.VMath = VMath;
+// }
 
 /*
 // A child class of Float32Array.  Typescript won't let us inherit
@@ -5119,6 +5119,6 @@ var _tz_techniqueParameterBufferCreate = function techniqueParameterBufferCreate
     return (tpb);
 };
 
-if (typeof TurbulenzEngine !== 'undefined' && TurbulenzEngine.hasOwnProperty('_createTechniqueParameterBuffer')) {
-    TurbulenzEngine._createTechniqueParameterBuffer = _tz_techniqueParameterBufferCreate;
-}
+// if (typeof TurbulenzEngine !== 'undefined' && TurbulenzEngine.hasOwnProperty('_createTechniqueParameterBuffer')) {
+//     TurbulenzEngine._createTechniqueParameterBuffer = _tz_techniqueParameterBufferCreate;
+// }

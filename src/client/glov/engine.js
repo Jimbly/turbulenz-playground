@@ -1,62 +1,110 @@
-/* global WebGLTurbulenzEngine:false */
-/* global TZWebGLShader:false */
-/* global TurbulenzEngine:true */
-/* global VMath: false */
-/* global $:false */
+// Portions Copyright 2019 Jimb Esser (https://github.com/Jimbly/)
+// Released under MIT License: https://opensource.org/licenses/MIT
+
+/* eslint-env browser */
 /* global Z:false */
 
 const assert = require('assert');
-const opengl = require('./tz/opengl.js');
-const { Draw2D } = require('./tz/draw2d.js');
-const { TextureEffects } = require('./tz/texture_effects.js');
-
+const camera2d = require('./camera2d.js');
+const effects = require('./effects.js');
 const glov_font = require('./font.js');
-const glov_transition = require('./transition.js');
+const font_info_palanquin32 = require('../img/font/palanquin32.json');
+const geom = require('./geom.js');
+const input = require('./input.js');
 const local_storage = require('./local_storage.js');
+const mat3FromMat4 = require('gl-mat3/fromMat4');
+const mat4Copy = require('gl-mat4/copy');
+const mat4Invert = require('gl-mat4/invert');
+const mat4Mul = require('gl-mat4/multiply');
+const mat4Transpose = require('gl-mat4/transpose');
+const mat4Perspective = require('gl-mat4/perspective');
+const { asin, cos, min, max, PI, sin, sqrt } = Math;
+const shaders = require('./shaders.js');
+const sprites = require('./sprites.js');
+const textures = require('./textures.js');
+const glov_transition = require('./transition.js');
+const glov_ui = require('./ui.js');
+const { mat3, mat4, vec3, vec4, v3mulMat4, v3normalize, v4copy } = require('./vmath.js');
 
-VMath.zero_vec = VMath.v4BuildZero();
-VMath.unit_vec = VMath.v4Build(1, 1, 1, 1);
-
-export let glov_camera;
-export let glov_input;
-export let glov_sprite;
-export let glov_ui;
+let canvas;
 export let glov_particles;
 export let sound_manager;
+
+export let width;
+export let height;
+export let pixel_aspect = 1;
+let clear_bits;
+
 export let game_width;
 export let game_height;
+
 export let render_width;
 export let render_height;
-export let pixel_aspect = 1;
-export let graphics_device;
-export let draw_2d;
-export let draw_list;
+
+export let defines = {};
+
+export const ZFAR = 10000;
+export const fov_y = 45 * PI / 180;
+export let fov_x = 1;
+
+export let mat_projection = mat4();
+export let mat_view = mat4();
+let mat_m = mat4();
+let mat_vp = mat4();
+let mat_mv = mat4();
+let mat_mvp = mat4();
+let mat_mv_inv_transform = mat3();
+
+export let light_diffuse = vec3(0.75, 0.75, 0.75);
+let light_dir_vs = vec3(0, 0, 0);
+let light_ambient = vec3(0.25, 0.25, 0.25);
+export let light_dir_ws = vec3(-1, -2, -3);
+
 export let font;
-export let effects;
 export let app_state = null;
 export const pico8_colors = [
-  VMath.v4Build(0, 0, 0, 1),
-  VMath.v4Build(0.114, 0.169, 0.326, 1),
-  VMath.v4Build(0.494, 0.145, 0.326, 1),
-  VMath.v4Build(0.000, 0.529, 0.328, 1),
-  VMath.v4Build(0.671, 0.322, 0.212, 1),
-  VMath.v4Build(0.373, 0.341, 0.310, 1),
-  VMath.v4Build(0.761, 0.765, 0.780, 1),
-  VMath.v4Build(1.000, 0.945, 0.910, 1),
-  VMath.v4Build(1.000, 0.000, 0.302, 1),
-  VMath.v4Build(1.000, 0.639, 0.000, 1),
-  VMath.v4Build(1.000, 0.925, 0.153, 1),
-  VMath.v4Build(0.000, 0.894, 0.212, 1),
-  VMath.v4Build(0.161, 0.678, 1.000, 1),
-  VMath.v4Build(0.514, 0.463, 0.612, 1),
-  VMath.v4Build(1.000, 0.467, 0.659, 1),
-  VMath.v4Build(1.000, 0.800, 0.667, 1),
+  vec4(0, 0, 0, 1),
+  vec4(0.114, 0.169, 0.326, 1),
+  vec4(0.494, 0.145, 0.326, 1),
+  vec4(0.000, 0.529, 0.328, 1),
+  vec4(0.671, 0.322, 0.212, 1),
+  vec4(0.373, 0.341, 0.310, 1),
+  vec4(0.761, 0.765, 0.780, 1),
+  vec4(1.000, 0.945, 0.910, 1),
+  vec4(1.000, 0.000, 0.302, 1),
+  vec4(1.000, 0.639, 0.000, 1),
+  vec4(1.000, 0.925, 0.153, 1),
+  vec4(0.000, 0.894, 0.212, 1),
+  vec4(0.161, 0.678, 1.000, 1),
+  vec4(0.514, 0.463, 0.612, 1),
+  vec4(1.000, 0.467, 0.659, 1),
+  vec4(1.000, 0.800, 0.667, 1),
 ];
 
 export let fps_style = glov_font.style({
   outline_width: 2, outline_color: 0x00000080,
   color: 0xFFFFFFff,
 });
+
+export function setGlobalMatrices(_mat_view) {
+  mat4Copy(mat_view, _mat_view);
+  mat4Mul(mat_vp, mat_projection, mat_view);
+  v3normalize(light_dir_ws, light_dir_ws);
+  v3mulMat4(light_dir_vs, light_dir_ws, mat_view);
+}
+
+let mat_temp = mat4();
+export function updateMatrices(mat_model) {
+  // PERFTODO: depending on rendering path, only some of these are needed (m + vp or just mvp)
+  mat4Copy(mat_m, mat_model);
+
+  mat4Mul(mat_mv, mat_view, mat_model);
+  mat4Mul(mat_mvp, mat_projection, mat_mv);
+  // TODO: Can expand and simplify all of this, especially below
+  mat4Invert(mat_temp, mat_mv);
+  mat4Transpose(mat_temp, mat_temp);
+  mat3FromMat4(mat_mv_inv_transform, mat_temp);
+}
 
 // *Maybe* don't need this logic anymore, postprocessing has been improved to be
 // efficient on all devices.
@@ -129,55 +177,10 @@ function resetEffects() {
   }
 }
 
-
-function glFilterValue(name) {
-  switch (name) {
-    case 'nearest':
-      return opengl.NEAREST;
-    case 'linear':
-      return opengl.LINEAR;
-    case 'mipmap':
-      return opengl.LINEAR_MIPMAP_LINEAR;
-    default:
-      assert(!name); // otherwise unhandled
-      return undefined; //eslint-disable-line consistent-return
-  }
-}
-
-function glWrapValue(name) {
-  switch (name) {
-    case 'clamp':
-      return opengl.CLAMP_TO_EDGE;
-    case 'wrap':
-      return opengl.REPEAT;
-    default:
-      assert(!name); // otherwise unhandled
-      return undefined; //eslint-disable-line consistent-return
-  }
-}
-
-export function createSampler(params) {
-  let gl_params = {
-    MaxAnisotropy: params.max_anisotropy,
-    MinFilter: glFilterValue(params.filter_min),
-    MagFilter: glFilterValue(params.filter_min),
-    WrapS: glWrapValue(params.wrap_s),
-    WrapT: glWrapValue(params.wrap_t),
-    WrapR: glWrapValue(params.wrap_r),
-  };
-  return TZWebGLShader.createSampler(graphics_device, gl_params);
-}
-
-export function getTextureForCapture() {
-  return graphics_device.createTexture({
-    mipmaps: false,
-    dynamic: true,
-    src: null,
-    format: 'R8G8B8', // or maybe 'R8G8B8A8'
-    name: 'screen_temporary_tex',
-    data: null,
-    no_data: true,
-  });
+export let viewport = vec4(0,0,1,1);
+export function setViewport(xywh) {
+  v4copy(viewport, xywh);
+  gl.viewport(xywh[0], xywh[1], xywh[2], xywh[3]);
 }
 
 export function getTemporaryTexture(w, h) {
@@ -187,7 +190,7 @@ export function getTemporaryTexture(w, h) {
     temp = temporary_textures[key] = { list: [], idx: 0 };
   }
   if (temp.idx >= temp.list.length) {
-    let tex = getTextureForCapture();
+    let tex = textures.createForCapture();
     temp.list.push(tex);
   }
   let tex = temp.list[temp.idx++];
@@ -195,7 +198,7 @@ export function getTemporaryTexture(w, h) {
   return tex;
 }
 
-export function captureFramebuffer(tex, w, h) {
+export function captureFramebuffer(tex, w, h, do_filter_linear, do_wrap) {
   if (!w && render_width) {
     w = render_width;
     h = render_height;
@@ -204,28 +207,25 @@ export function captureFramebuffer(tex, w, h) {
     tex = getTemporaryTexture(w, h);
   }
   if (w) {
-    let viewport = graphics_device.getViewport();
-    if (viewport) {
-      tex.copyTexImage(viewport[0], viewport[1], w, h);
-    } else {
-      tex.copyTexImage(0, 0, w, h);
-    }
+    tex.copyTexImage(viewport[0], viewport[1], w, h);
   } else {
-    tex.copyTexImage();
+    tex.copyTexImage(0, 0, width, height);
   }
+  tex.setSamplerState({
+    filter_min: do_filter_linear ? gl.LINEAR : gl.NEAREST,
+    filter_mag: do_filter_linear ? gl.LINEAR : gl.NEAREST,
+    wrap_s: do_wrap ? gl.REPEAT : gl.CLAMP_TO_EDGE,
+    wrap_t: do_wrap ? gl.REPEAT : gl.CLAMP_TO_EDGE,
+  });
   return tex;
 }
 
-let copy_nearest_sampler;
 let last_tick = Date.now();
 function tick() {
-  if (!graphics_device.beginFrame()) {
-    resetEffects();
-    return;
-  }
   let now = Date.now();
+  requestAnimationFrame(tick);
   this_frame_time_actual = now - last_tick;
-  let dt = Math.min(Math.max(this_frame_time_actual, 1), 250);
+  let dt = min(max(this_frame_time_actual, 1), 250);
   this_frame_time = dt;
   last_tick = now;
   global_timer += dt;
@@ -236,38 +236,56 @@ function tick() {
     mspf = (now - mspf_update_time) / mspf_frame_count;
     mspf_frame_count = 0;
     mspf_update_time = now;
+    // if (show_fps && fps_elem) {
+    //   fps_elem.innerText = `${(1000 / mspf).toFixed(0)}fps (${mspf.toFixed(1)} ms/f)`;
+    // }
   }
 
-  glov_camera.tick();
-  glov_camera.set2DAspectFixed(game_width, game_height);
+  if (document.hidden || document.webkitHidden) {
+    resetEffects();
+    return;
+  }
+
+  width = canvas.width;
+  height = canvas.height;
+
+  let rise = width/height * sin(fov_y / 2) / cos(fov_y / 2);
+  fov_x = 2 * asin(rise / sqrt(rise * rise + 1));
+  mat4Perspective(mat_projection, fov_y, width/height, 0.7, ZFAR);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.enable(gl.BLEND);
+  gl.enable(gl.DEPTH_TEST);
+  textures.bind(0, textures.textures.error);
+
+  camera2d.tick();
+  camera2d.setAspectFixed(game_width, game_height);
+
   sound_manager.tick(dt);
-  glov_input.tick();
+  input.tick();
   glov_ui.tick(dt);
 
   if (need_repos) {
     --need_repos;
     let ul = [];
-    glov_camera.virtualToPhysical(ul, [0,0]);
+    camera2d.virtualToPhysical(ul, [0,0]);
     let lr = [];
-    glov_camera.virtualToPhysical(lr, [game_width-1,game_height-1]);
-    let viewport = [ul[0], ul[1], lr[0], lr[1]];
-    let height = viewport[3] - viewport[1];
+    camera2d.virtualToPhysical(lr, [game_width-1,game_height-1]);
+    let viewport2 = [ul[0], ul[1], lr[0], lr[1]];
+    let view_height = viewport2[3] - viewport2[1];
     // default font size of 16 when at height of game_height
-    let font_size = Math.min(256, Math.max(2, Math.floor(height/800 * 16)));
-    $('#fullscreen').css({
-      'font-size': font_size,
-    });
+    let font_size = Math.min(256, Math.max(2, Math.floor(view_height/800 * 16)));
+    document.getElementById('fullscreen').style['font-size'] = `${font_size}px`;
   }
 
   if (do_borders) {
     // Borders
-    glov_ui.drawRect(glov_camera.x0(), glov_camera.y0(), glov_camera.x1(), 0, Z.BORDERS,
+    glov_ui.drawRect(camera2d.x0(), camera2d.y0(), camera2d.x1(), 0, Z.BORDERS,
       pico8_colors[0]);
-    glov_ui.drawRect(glov_camera.x0(), game_height, glov_camera.x1(), glov_camera.y1(), Z.BORDERS,
+    glov_ui.drawRect(camera2d.x0(), game_height, camera2d.x1(), camera2d.y1(), Z.BORDERS,
       pico8_colors[0]);
-    glov_ui.drawRect(glov_camera.x0(), 0, 0, game_height, Z.BORDERS,
+    glov_ui.drawRect(camera2d.x0(), 0, 0, game_height, Z.BORDERS,
       pico8_colors[0]);
-    glov_ui.drawRect(game_width, 0, glov_camera.x1(), game_height, Z.BORDERS,
+    glov_ui.drawRect(game_width, 0, camera2d.x1(), game_height, Z.BORDERS,
       pico8_colors[0]);
   }
 
@@ -278,9 +296,9 @@ function tick() {
     app_state(dt);
   }
   if (show_fps) {
-    glov_camera.set2DAspectFixed(game_width, game_height);
-    font.drawSizedAligned(fps_style, glov_camera.x0(), glov_camera.y0(), Z.FPSMETER, glov_ui.font_height,
-      glov_font.ALIGN.HRIGHT, glov_camera.w(), 0, `FPS: ${(1000 / mspf).toFixed(1)} (${mspf.toFixed(0)}ms/f)`);
+    camera2d.setAspectFixed(game_width, game_height);
+    font.drawSizedAligned(fps_style, camera2d.x0(), camera2d.y0(), Z.FPSMETER, glov_ui.font_height,
+      glov_font.ALIGN.HRIGHT, camera2d.w(), 0, `FPS: ${(1000 / mspf).toFixed(1)} (${mspf.toFixed(0)}ms/f)`);
   }
 
   glov_particles.tick(dt); // *after* app_tick, so newly added/killed particles can be queued into the draw list
@@ -288,14 +306,11 @@ function tick() {
 
   // Above is queuing, below is actual drawing
 
-  if (render_width) {
-    graphics_device.setViewport(0, 0, render_width, render_height);
-  }
+  gl.viewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+  // gl.scissor(0, 0, viewport[2] - viewport[0], viewport[3] - viewport[1]);
+  gl.clear(clear_bits);
 
-  draw_2d.setBackBuffer();
-  draw_2d.clear([0, 0, 0, 1]);
-
-  draw_list.draw();
+  sprites.draw();
 
   glov_ui.endFrame();
 
@@ -303,48 +318,35 @@ function tick() {
     let source = captureFramebuffer();
     let clear_color = [0, 0, 0, 1];
     let final_viewport = [
-      glov_camera.render_offset_x, glov_camera.render_offset_y,
-      glov_camera.render_viewport_w, glov_camera.render_viewport_h
+      camera2d.render_offset_x, camera2d.render_offset_y,
+      camera2d.render_viewport_w, camera2d.render_viewport_h
     ];
     if (do_viewport_postprocess) {
       effects.applyPixelyExpand({ source, final_viewport, clear_color });
     } else {
       if (clear_color) {
-        graphics_device.clear(clear_color);
+        gl.clearColor(clear_color[0], clear_color[1], clear_color[2], clear_color[3]);
+        gl.clear(gl.COLOR_BUFFER_BIT);
       }
-      graphics_device.setViewport(...final_viewport);
-      graphics_device.setScissor(0, 0, graphics_device.width, graphics_device.height);
-      if (!copy_nearest_sampler) {
-        copy_nearest_sampler = createSampler({
-          filter_min: 'nearest',
-          filter_max: 'nearest',
-          wrap_s: 'clamp',
-          wrap_t: 'clamp',
-        });
-      }
-      source.override_sampler = copy_nearest_sampler;
+      setViewport(final_viewport);
+      // gl.scissor(0, 0, width, height);
       effects.applyCopy({ source });
     }
   }
 
-  graphics_device.endFrame();
-  glov_input.endFrame();
+  input.endFrame();
   resetEffects();
 }
 
 
 export function startup(params) {
-  let canvas = params.canvas;
+  // globals for leftover Turbulenz bits
+  window.TurbulenzEngine = null;
+  window.assert = assert;
+
+  canvas = params.canvas;
+  assert(gl);
   canvas.focus();
-  TurbulenzEngine = WebGLTurbulenzEngine.create({
-    canvas: canvas,
-    fillParent: true
-  });
-  if (!TurbulenzEngine) {
-    // eslint-disable-next-line no-alert
-    window.alert('Failed to init TurbulenzEngine (canvas)');
-    return;
-  }
   game_width = params.game_width || 1280;
   game_height = params.game_height || 960;
   if (params.pixely === 'strict') {
@@ -359,47 +361,69 @@ export function startup(params) {
   }
   pixel_aspect = params.pixel_aspect || 1;
 
-  graphics_device = TurbulenzEngine.createGraphicsDevice({});
-  let shaders = params.shaders || {};
-  let draw2d_params = { graphicsDevice: graphics_device, shaders };
-  /* eslint-disable global-require */
-  glov_transition.populateDraw2DParams(draw2d_params);
-  glov_font.populateDraw2DParams(draw2d_params);
-  draw_2d = Draw2D.create(draw2d_params);
-  glov_camera = require('./camera.js').create(graphics_device, draw_2d);
-  const input_device = TurbulenzEngine.createInputDevice({});
-  glov_input = require('./input.js').create(input_device, draw_2d, glov_camera);
-  draw_list = require('./draw_list.js').create(graphics_device, draw_2d, glov_camera);
-  glov_sprite = require('./sprite.js').create(graphics_device, draw_list);
-  glov_particles = require('./particles.js').create(draw_list, glov_sprite);
+  gl.depthFunc(gl.LEQUAL);
+  // gl.enable(gl.SCISSOR_TEST);
+  gl.enable(gl.CULL_FACE);
+  gl.cullFace(gl.BACK);
+  gl.clearColor(0, 0.1, 0.2, 1);
 
-  effects = new TextureEffects({
-    graphicsDevice: graphics_device,
+  // Use &D=WIREFRAME to set the WIREFRAME define
+  let m = document.location.search.match(/D=[^&]+/gu);
+  if (m) {
+    m.forEach((v) => {
+      defines[v.slice(2)] = true;
+    });
+  }
+
+  textures.startup();
+  geom.startup();
+  shaders.startup({
+    light_diffuse,
+    light_dir_vs,
+    ambient: light_ambient,
+    mat_m: mat_m,
+    mat_vp: mat_vp,
+    mvp: mat_mvp,
+    mv_inv_trans: mat_mv_inv_transform,
+    view: mat_view,
+    projection: mat_projection,
   });
+  camera2d.startup();
+  sprites.startup();
+  input.startup(canvas);
 
-  draw_list.setNearest(Boolean(params.pixely));
+  // eslint-disable-next-line no-bitwise
+  clear_bits = gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT;
+
+  /* eslint-disable global-require */
+  glov_particles = require('./particles.js').create();
+
+  if (params.pixely && params.pixely !== 'off') {
+    textures.defaultFilters(gl.NEAREST, gl.NEAREST);
+  } else {
+    textures.defaultFilters(gl.LINEAR, gl.LINEAR);
+  }
 
   sound_manager = require('./sound_manager.js').create();
 
-  const font_info_palanquin32 = require('../img/font/palanquin32.json');
   const font_info_04b03x2 = require('../img/font/04b03_8x2.json');
   const font_info_04b03x1 = require('../img/font/04b03_8x1.json');
   if (params.font) {
-    font = glov_font.create(draw_list, params.font.info, glov_sprite.loadTexture(params.font.texture));
+    font = glov_font.create(params.font.info, params.font.texture);
   } else if (params.pixely === 'strict') {
-    font = glov_font.create(draw_list, font_info_04b03x1, glov_sprite.loadTexture('font/04b03_8x1.png'));
+    font = glov_font.create(font_info_04b03x1, 'font/04b03_8x1');
   } else if (params.pixely) {
-    font = glov_font.create(draw_list, font_info_04b03x2, glov_sprite.loadTexture('font/04b03_8x2.png'));
+    font = glov_font.create(font_info_04b03x2, 'font/04b03_8x2');
   } else {
-    font = glov_font.create(draw_list, font_info_palanquin32, glov_sprite.loadTexture('font/palanquin32.png'));
+    font = glov_font.create(font_info_palanquin32, 'font/palanquin32');
   }
-  glov_ui = require('./ui.js').create(font, draw_list, params.ui_sprites);
+  glov_ui.startup(font, params.ui_sprites);
   glov_ui.bindSounds(sound_manager, { // TODO: Allow overriding?
     button_click: 'button_click',
     rollover: 'rollover',
   });
 
-  glov_camera.set2DAspectFixed(game_width, game_height);
+  camera2d.setAspectFixed(game_width, game_height);
 
   function onResize() {
     // This used to be here, but it breaks mobile devices / edit boxes
@@ -421,16 +445,15 @@ export function startup(params) {
     show_fps = params.show_fps;
   }
 
-  // TODO: Use requestAnimationFrame instead?
-  TurbulenzEngine.setInterval(tick, 1000/60);
-  /* eslint-enable global-require */
+  requestAnimationFrame(tick);
 }
 
 function loading() {
-  let load_count = glov_sprite.loading() + sound_manager.loading();
-  $('#loading_text').text(`Loading (${load_count})...`);
+  let load_count = textures.load_count + sound_manager.loading()/* + models.load_count */;
+  document.getElementById('loading_text').innerText = `Loading (${load_count})...`;
   if (!load_count) {
-    $('#loading').hide();
+    let elem = document.getElementById('loading');
+    elem.style.visibility = 'hidden';
     is_loading = false;
     app_state = after_loading_state;
   }

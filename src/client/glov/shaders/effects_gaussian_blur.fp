@@ -1,11 +1,9 @@
-#ifdef GL_ES
-#define TZ_LOWP lowp
+#pragma WebGL
+
 precision highp float;
 precision highp int;
-#else
-#define TZ_LOWP
-#endif
-varying vec4 tz_TexCoord[1];
+
+varying vec2 interp_texcoord;
 
 vec4 _ret_0;
 vec4 _TMP2;
@@ -18,7 +16,7 @@ uniform float Gauss[9];
 
 void main()
 {
-  vec2 uv = tz_TexCoord[0].xy;
+  vec2 uv = interp_texcoord;
   vec2 step = sampleRadius;
   gl_FragColor =
     ((texture2D(inputTexture0, uv - step * 3.0) + texture2D(inputTexture0, uv + step * 3.0)) * 0.085625 +

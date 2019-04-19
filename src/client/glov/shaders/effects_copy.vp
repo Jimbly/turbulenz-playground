@@ -1,16 +1,14 @@
-#ifdef GL_ES
+#pragma WebGL
 precision highp float;
-precision highp int;
-#endif
 
-varying vec4 tz_TexCoord[1];
-attribute vec4 ATTR0;
+varying vec2 interp_texcoord;
+attribute vec2 POSITION;
 
-uniform vec2 copyUVScale;
-uniform vec4 clipSpace;
+uniform vec2 copy_uv_scale;
+uniform vec4 clip_space;
 
 void main()
 {
-  tz_TexCoord[0].xy = ATTR0.xy * copyUVScale;
-  gl_Position = vec4(ATTR0.xy * clipSpace.xy + clipSpace.zw, 0, 1);
+  interp_texcoord = POSITION * copy_uv_scale;
+  gl_Position = vec4(POSITION * clip_space.xy + clip_space.zw, 0, 1);
 }

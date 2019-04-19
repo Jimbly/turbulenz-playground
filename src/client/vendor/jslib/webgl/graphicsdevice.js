@@ -561,7 +561,7 @@ var TZWebGLTexture = (function () {
                     } else if (data) {
                         // JE: Pad up to power of two
                         if (!isPowerOfTwo(w) || !isPowerOfTwo(h)) {
-                          assert(n === 0);
+                          debug.assert(n === 0);
                           this.width = nextHighestPowerOfTwo(w);
                           this.height = nextHighestPowerOfTwo(h);
                           gl.texImage2D(target, n, internalFormat, this.width, this.height, 0, internalFormat, gltype, null);

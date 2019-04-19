@@ -1,436 +1,792 @@
-/*global VMath: false */
-/*global assert: false */
+// Portions Copyright 2019 Jimb Esser (https://github.com/Jimbly/)
+// Released under MIT License: https://opensource.org/licenses/MIT
+// Some code from Turbulenz: Copyright (c) 2012-2013 Turbulenz Limited
+// Released under MIT License: https://opensource.org/licenses/MIT
+/* global navigator */
 
-let VMathArrayConstructor = VMath.F32Array;
-
+const assert = require('assert');
+const camera2d = require('./camera2d.js');
+const local_storage = require('./local_storage.js');
 const glov_engine = require('./engine.js');
+const { abs, min, sqrt } = Math;
+const { vec2, v2add, v2copy, v2lengthSq, v2set, v2scale, v2sub } = require('./vmath.js');
 
 const UP_EDGE = 0;
 const DOWN_EDGE = 1;
 const DOWN = 2;
 
-class GlovInput {
-  constructor(input_device, draw2d, camera) {
-    this.input_device = input_device;
-    this.draw2d = draw2d;
-    this.camera = camera;
-    this.key_state = {};
-    this.pad_states = []; // One map per joystick
-    this.clicks = [];
-    this.mouse_pos = new VMathArrayConstructor(2);
-    this.mouse_pos_is_touch = false;
-    this.mpos = new VMathArrayConstructor(2); // temporary, mapped to camera
-    this.mouse_over_captured = false;
-    this.mouse_down = [];
-    this.pad_threshold = 0.25;
-    this.last_touch_state = [];
-    this.touch_state = [];
-    this.touch_as_mouse = true;
-    this.map_analog_to_dpad = true; // user overrideable
+// per-app overrideable options
+const TOUCH_AS_MOUSE = true;
+const MAP_ANALOG_TO_DPAD = true;
 
-    this.input_eaten_kb = false;
-    this.input_eaten_mouse = false;
+export const ANY = -2;
+export const POINTERLOCK = -1;
 
-    this.pad_codes = input_device.padCodes;
-    this.pad_codes.ANALOG_UP = 20;
-    this.pad_codes.ANALOG_LEFT = 21;
-    this.pad_codes.ANALOG_DOWN = 22;
-    this.pad_codes.ANALOG_RIGHT = 23;
-    this.key_codes = input_device.keyCodes;
-    this.key_codes.SHIFT = 1000;
-    this.key_codes.CONTROL = 1001;
-    this.key_codes.ALT = 1002;
+export const KEYS = {
+  BACKSPACE: 8,
+  TAB: 9,
+  ENTER: 13,
+  RETURN: 13,
+  SHIFT: 16,
+  CTRL: 17,
+  ALT: 18,
+  ESC: 27,
+  SPACE: 32,
+  PAGEUP: 33,
+  PAGEDOWN: 34,
+  END: 35,
+  HOME: 36,
+  LEFT: 37,
+  UP: 38,
+  RIGHT: 39,
+  DOWN: 40,
+  INS: 45,
+  DEL: 46,
+};
+(function () {
+  for (let ii = 1; ii <= 12; ++ii) {
+    KEYS[`F${ii}`] = 111 + ii;
+  }
+  for (let ii = 48; ii <= 90; ++ii) { // 0-9;A-Z
+    KEYS[String.fromCharCode(ii)] = ii;
+  }
+}());
+export const pad_codes = {
+  A: 0,
+  SELECT: 0, // GLOV name
+  B: 1,
+  CANCEL: 1, // GLOV name
+  X: 2,
+  Y: 3,
+  LB: 4,
+  LEFT_BUMPER: 4,
+  RB: 5,
+  RIGHT_BUMPER: 5,
+  LT: 6,
+  LEFT_TRIGGER: 6,
+  RT: 7,
+  RIGHT_TRIGGER: 7,
+  BACK: 8,
+  START: 9,
+  LEFT_STICK: 10,
+  RIGHT_STICK: 11,
+  UP: 12,
+  DOWN: 13,
+  LEFT: 14,
+  RIGHT: 15,
+  ANALOG_UP: 20,
+  ANALOG_LEFT: 21,
+  ANALOG_DOWN: 22,
+  ANALOG_RIGHT: 23,
+};
 
-    input_device.addEventListener('keydown', (keycode) => this.onKeyDown(keycode));
-    input_device.addEventListener('keyup', (keycode) => this.onKeyUp(keycode));
+let canvas;
+let key_state = {};
+let pad_states = []; // One map per gamepad to pad button states
+let gamepad_data = []; // Other tracking data per gamepad
+let mouse_pos = vec2();
+let last_mouse_pos = vec2();
+let mouse_pos_is_touch = false;
+let mouse_over_captured = false;
+let mouse_down = [];
+let mouse_wheel = 0;
 
-    input_device.addEventListener('mousedown', (mousecode, x, y) => this.onMouseDown(mousecode, x, y));
-    input_device.addEventListener('mouseup', (mousecode, x, y) => this.onMouseUp(mousecode, x, y));
-    input_device.addEventListener('mouseover', (x,y) => this.onMouseOver(x, y));
+let input_eaten_kb = false;
+let input_eaten_mouse = false;
 
+let touches = {}; // `m${button}` or touch_id -> TouchData
 
-    input_device.addEventListener('paddown', (padindex, padcode) => this.onPadDown(padindex, padcode));
-    input_device.addEventListener('padup', (padindex, padcode) => this.onPadUp(padindex, padcode));
-    input_device.addEventListener('padmove',
-      (padindex, x, y, z, rx, ry, rz) => this.onPadMove(padindex, x, y, z, rx, ry, rz));
+export let touch_mode = local_storage.getJSON('touch_mode', false);
 
-    input_device.addEventListener('touchstart', (evt) => this.onTouchChange(evt));
-    input_device.addEventListener('touchend', (evt) => this.onTouchChange(evt));
-    input_device.addEventListener('touchmove', (evt) => this.onTouchChange(evt));
-
-  }
-  tick() {
-    // browser frame has occurred since the call to endFrame(),
-    // we should now have .clicks and this.key_state populated with edge events
-    this.mouse_over_captured = false;
-    this.input_device.update();
-  }
-  endFrame() {
-    function tickMap(map) {
-      Object.keys(map).forEach((keycode) => {
-        switch (map[keycode]) {
-          case DOWN_EDGE:
-            map[keycode] = DOWN;
-            break;
-          case UP_EDGE:
-            delete map[keycode];
-            break;
-          default:
-        }
-      });
-    }
-    tickMap(this.key_state);
-    this.pad_states.forEach(tickMap);
-    this.clicks = [];
-    this.input_eaten_kb = false;
-    this.input_eaten_mouse = false;
-  }
-
-  eatAllKeyboardInput() {
-    let clicks_save = this.clicks;
-    let over_save = this.mouse_over_captured;
-    let eaten_mouse_save = this.input_eaten_mouse;
-    this.eatAllInput();
-    this.clicks = clicks_save;
-    this.mouse_over_captured = over_save;
-    this.input_eaten_mouse = eaten_mouse_save;
-  }
-
-  eatAllInput() {
-    // destroy clicks, remove all down and up edges
-    this.endFrame();
-    this.mouse_over_captured = true;
-    this.input_eaten_kb = true;
-    this.input_eaten_mouse = true;
-  }
-
-  onMouseDown(mousecode, x, y) {
-    this.onMouseOver(x, y); // update this.mouse_pos
-    this.mouse_down[mousecode] = true;
-    glov_engine.sound_manager.resume();
-  }
-  onMouseUp(mousecode, x, y) {
-    this.onMouseOver(x, y); // update this.mouse_pos
-    this.clicks[mousecode] = this.clicks[mousecode] || [];
-    this.clicks[mousecode].push({ pos: this.mouse_pos.slice(0), touch: false });
-    this.mouse_down[mousecode] = false;
-  }
-  onMouseOver(x, y) {
-    this.mouse_pos[0] = x;
-    this.mouse_pos[1] = y;
-    this.mouse_pos_is_touch = false;
-    //this.draw2d.viewportMap(x, y, this.mouse_mapped);
-  }
-  isMouseOver(param) {
-    assert(typeof param.x === 'number');
-    assert(typeof param.y === 'number');
-    assert(typeof param.w === 'number');
-    assert(typeof param.h === 'number');
-    if (this.mouse_over_captured) {
-      return false;
-    }
-    this.mousePos(this.mpos);
-    if (this.mpos[0] >= param.x &&
-      (param.w === Infinity || this.mpos[0] < param.x + param.w) &&
-      this.mpos[1] >= param.y &&
-      (param.h === Infinity || this.mpos[1] < param.y + param.h)
-    ) {
-      this.mouse_over_captured = true;
-      return true;
-    }
-    return false;
-  }
-  isMouseDown(button) {
-    button = button || 0;
-    return !this.input_eaten_mouse && this.mouse_down[button];
-  }
-  // returns position mapped to current camera view
-  mousePos(dst) {
-    dst = dst || new VMathArrayConstructor(2);
-    this.camera.physicalToVirtual(dst, this.mouse_pos);
-    return dst;
-  }
-  mousePosIsTouch() {
-    return this.mouse_pos_is_touch;
-  }
-  clickHit(param) {
-    assert(typeof param.x === 'number');
-    assert(typeof param.y === 'number');
-    assert(typeof param.w === 'number');
-    assert(typeof param.h === 'number');
-    let button = param.button || 0;
-    if (!this.clicks[button]) {
-      return false;
-    }
-    this.mousePos(this.mpos);
-    for (let ii = 0; ii < this.clicks[button].length; ++ii) {
-      let click = this.clicks[button][ii];
-      let pos = click.pos;
-      this.camera.physicalToVirtual(this.mpos, pos);
-      if (this.mpos[0] >= param.x &&
-        (param.w === Infinity || this.mpos[0] < param.x + param.w) &&
-        this.mpos[1] >= param.y &&
-        (param.h === Infinity || this.mpos[1] < param.y + param.h)
-      ) {
-        this.clicks[button].splice(ii, 1);
-        return this.mpos.slice(0);
-      }
-    }
-    return false;
-  }
-
-  onTouchChange(param) {
-    this.last_touch_state = this.touch_state;
-    this.touch_state = (param.touches || []).filter((t) => t.force);
-    if (this.touch_as_mouse) {
-      if (this.last_touch_state.length === 1 && this.touch_state.length === 0) {
-        // click!
-        this.mouse_down[0] = false;
-        // update this.mouse_pos
-        this.onMouseOver(this.last_touch_state[0].positionX, this.last_touch_state[0].positionY);
-        this.mouse_pos_is_touch = true;
-        this.clicks[0] = this.clicks[0] || [];
-        this.clicks[0].push({ pos: this.mouse_pos.slice(0), touch: true });
-      } else if (this.touch_state.length === 1) {
-        this.mouse_down[0] = true;
-        this.onMouseOver(this.touch_state[0].positionX, this.touch_state[0].positionY);
-        this.mouse_pos_is_touch = true;
-      } else if (this.touch_state.length > 1) {
-        this.mouse_down[0] = false;
-        // no click
-      }
-    }
-    //throw JSON.stringify(param, undefined, 2);
-  }
-  isTouchDown(param) {
-    if (param) {
-      assert(typeof param.x === 'number');
-      assert(typeof param.y === 'number');
-      assert(typeof param.w === 'number');
-      assert(typeof param.h === 'number');
-    }
-    if (this.input_eaten_mouse) {
-      return false;
-    }
-    for (let ii = 0; ii < this.touch_state.length; ++ii) {
-      this.camera.physicalToVirtual(this.mpos, [this.touch_state[ii].positionX, this.touch_state[ii].positionY]);
-      let pos = this.mpos;
-      if (!param ||
-        pos[0] >= param.x && pos[0] < param.x + param.w &&
-        pos[1] >= param.y && pos[1] < param.y + param.h
-      ) {
-        return pos;
-      }
-    }
-    return false;
-  }
-  isTouchDownSprite(sprite) {
-    const w = sprite.getWidth();
-    const h = sprite.getHeight();
-    return this.isTouchDown({
-      x: sprite.x - w/2,
-      y: sprite.y - h/2,
-      w,
-      h,
-    });
-  }
-
-  onKeyUp(keycode) {
-    this.key_state[keycode] = UP_EDGE;
-  }
-  onKeyDown(keycode) {
-    this.key_state[keycode] = DOWN_EDGE;
-  }
-
-  doConvenienceKeys(fn, keycode) {
-    switch (keycode) {
-      case this.key_codes.SHIFT:
-        return this[fn](this.key_codes.LEFT_SHIFT) || this[fn](this.key_codes.RIGHT_SHIFT);
-      case this.key_codes.CONTROL:
-        return this[fn](this.key_codes.LEFT_CONTROL) || this[fn](this.key_codes.RIGHT_CONTROL);
-      case this.key_codes.ALT:
-        return this[fn](this.key_codes.LEFT_ALT) || this[fn](this.key_codes.RIGHT_ALT);
-      default:
-        assert(!'invalid keycode');
-    }
-    return false;
-  }
-
-  isKeyDown(keycode) {
-    if (this.input_eaten_kb) {
-      return false;
-    }
-    if (keycode >= 1000) {
-      return this.doConvenienceKeys('isKeyDown', keycode);
-    }
-    return Boolean(this.key_state[keycode]);
-  }
-  keyDownHit(keycode) {
-    if (keycode >= 1000) {
-      return this.doConvenienceKeys('keyDownHit', keycode);
-    }
-    if (this.key_state[keycode] === DOWN_EDGE) {
-      this.key_state[keycode] = DOWN;
-      return true;
-    }
-    return false;
-  }
-  keyUpHit(keycode) {
-    if (keycode >= 1000) {
-      return this.doConvenienceKeys('keyUpHit', keycode);
-    }
-    if (this.key_state[keycode] === UP_EDGE) {
-      delete this.key_state[keycode];
-      return true;
-    }
-    return false;
-  }
-
-  onPadUp(padindex, padcode) {
-    this.pad_states[padindex] = this.pad_states[padindex] || { axes: {} };
-    this.pad_states[padindex][padcode] = UP_EDGE;
-  }
-  onPadDown(padindex, padcode) {
-    this.pad_states[padindex] = this.pad_states[padindex] || { axes: {} };
-    this.pad_states[padindex][padcode] = DOWN_EDGE;
-  }
-  onPadMove(padindex, x, y, z, rx, ry, rz) {
-    let ps = this.pad_states[padindex] = this.pad_states[padindex] || { axes: {} };
-    ps.axes.x = x;
-    ps.axes.y = y;
-    ps.axes.z = z;
-    ps.axes.rx = rx;
-    ps.axes.ry = ry;
-    ps.axes.rz = rz;
-    // Calculate virtual directional buttons
-    function check(b, c) {
-      if (b) {
-        if (ps[c] !== DOWN) {
-          ps[c] = DOWN_EDGE;
-        }
-      } else if (ps[c]) {
-        ps[c] = UP_EDGE;
-      }
-    }
-    check(x < -this.pad_threshold, this.pad_codes.ANALOG_LEFT);
-    check(x > this.pad_threshold, this.pad_codes.ANALOG_RIGHT);
-    check(y < -this.pad_threshold, this.pad_codes.ANALOG_DOWN);
-    check(y > this.pad_threshold, this.pad_codes.ANALOG_UP);
-  }
-  isPadButtonDown(padindex, padcode) {
-    // Handle calling without a specific pad index
-    if (padcode === undefined) {
-      for (let ii = 0; ii < this.pad_states.length; ++ii) {
-        if (this.isPadButtonDown(ii, padindex)) {
-          return true;
-        }
-      }
-      return false;
-    }
-
-    if (this.input_eaten_mouse) {
-      return false;
-    }
-    if (!this.pad_states[padindex]) {
-      return false;
-    }
-    if (this.map_analog_to_dpad) {
-      if (padcode === this.pad_codes.LEFT && this.isPadButtonDown(padindex, this.pad_codes.ANALOG_LEFT)) {
-        return true;
-      }
-      if (padcode === this.pad_codes.RIGHT && this.isPadButtonDown(padindex, this.pad_codes.ANALOG_RIGHT)) {
-        return true;
-      }
-      if (padcode === this.pad_codes.UP && this.isPadButtonDown(padindex, this.pad_codes.ANALOG_UP)) {
-        return true;
-      }
-      if (padcode === this.pad_codes.DOWN && this.isPadButtonDown(padindex, this.pad_codes.ANALOG_DOWN)) {
-        return true;
-      }
-    }
-    return Boolean(this.pad_states[padindex][padcode]);
-  }
-  padGetAxes(padindex) {
-    if (padindex === undefined) {
-      let ret = { x: 0, y: 0 };
-      for (let ii = 0; ii < this.pad_states.length; ++ii) {
-        let sub = this.padGetAxes(ii);
-        ret.x += sub.x;
-        ret.y += sub.y;
-      }
-      return ret;
-    }
-    let ps = this.pad_states[padindex] = this.pad_states[padindex] || { axes: {} };
-    let axes = ps.axes;
-    return { x: axes.x || 0, y: axes.y || 0 };
-  }
-  padDownHit(padindex, padcode) {
-    // Handle calling without a specific pad index
-    if (padcode === undefined) {
-      for (let ii = 0; ii < this.pad_states.length; ++ii) {
-        if (this.padDownHit(ii, padindex)) {
-          return true;
-        }
-      }
-      return false;
-    }
-
-    if (!this.pad_states[padindex]) {
-      return false;
-    }
-    if (padcode === this.pad_codes.LEFT && this.padDownHit(padindex, this.pad_codes.ANALOG_LEFT)) {
-      return true;
-    }
-    if (padcode === this.pad_codes.RIGHT && this.padDownHit(padindex, this.pad_codes.ANALOG_RIGHT)) {
-      return true;
-    }
-    if (padcode === this.pad_codes.UP && this.padDownHit(padindex, this.pad_codes.ANALOG_UP)) {
-      return true;
-    }
-    if (padcode === this.pad_codes.DOWN && this.padDownHit(padindex, this.pad_codes.ANALOG_DOWN)) {
-      return true;
-    }
-    if (this.pad_states[padindex][padcode] === DOWN_EDGE) {
-      this.pad_states[padindex][padcode] = DOWN;
-      return true;
-    }
-    return false;
-  }
-  padUpHit(padindex, padcode) {
-    // Handle calling without a specific pad index
-    if (padcode === undefined) {
-      for (let ii = 0; ii < this.pad_states.length; ++ii) {
-        if (this.padUpHit(ii, padindex)) {
-          return true;
-        }
-      }
-      return false;
-    }
-
-    if (!this.pad_states[padindex]) {
-      return false;
-    }
-    if (padcode === this.pad_codes.LEFT && this.padUpHit(padindex, this.pad_codes.ANALOG_LEFT)) {
-      return true;
-    }
-    if (padcode === this.pad_codes.RIGHT && this.padUpHit(padindex, this.pad_codes.ANALOG_RIGHT)) {
-      return true;
-    }
-    if (padcode === this.pad_codes.UP && this.padUpHit(padindex, this.pad_codes.ANALOG_UP)) {
-      return true;
-    }
-    if (padcode === this.pad_codes.DOWN && this.padUpHit(padindex, this.pad_codes.ANALOG_DOWN)) {
-      return true;
-    }
-    if (this.pad_states[padindex][padcode] === UP_EDGE) {
-      delete this.pad_states[padindex][padcode];
-      return true;
-    }
-    return false;
-  }
-
+function TouchData(pos, touch, button) {
+  this.delta = vec2();
+  this.total = 0;
+  this.cur_pos = pos.slice(0);
+  this.start_pos = pos.slice(0);
+  this.release = false;
+  this.touch = touch;
+  this.button = button;
+  this.start_time = Date.now();
+  this.dispatched = false;
+  this.state = DOWN_EDGE;
 }
 
-export function create(...args) {
-  return new GlovInput(...args);
+export function pointerLocked() {
+  return document.pointerLockElement || document.mozPointerLockElement || document.webkitPointerLockElement;
+}
+let pointerlock_touch_id = `m${POINTERLOCK}`;
+export function pointerLockEnter() {
+  let touch_data = touches[pointerlock_touch_id];
+  if (touch_data) {
+    v2copy(touch_data.start_pos, mouse_pos);
+    touch_data.release = false;
+  } else {
+    touch_data = touches[pointerlock_touch_id] = new TouchData(mouse_pos, false, POINTERLOCK);
+    touch_data.state = DOWN; // No DOWN_EDGE for this
+  }
+  return canvas.requestPointerLock && canvas.requestPointerLock();
+}
+export function pointerLockExit() {
+  let touch_data = touches[pointerlock_touch_id];
+  if (touch_data) {
+    v2copy(touch_data.cur_pos, mouse_pos);
+    touch_data.state = null; // no UP_EDGE for this
+    touch_data.release = true;
+  }
+  document.exitPointerLock();
+}
+
+function ignored(event) {
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+function onKeyUp(event) {
+  let code = event.keyCode;
+  if (event.target.tagName !== 'INPUT') {
+    event.stopPropagation();
+    event.preventDefault();
+  }
+
+  if (code === KEYS.ESC && pointerLocked()) {
+    pointerLockExit();
+  }
+  key_state[code] = UP_EDGE;
+}
+
+function onKeyDown(event) {
+  let code = event.keyCode;
+  if (code !== KEYS.F12 && code !== KEYS.F5 && code !== KEYS.F6 && event.target.tagName !== 'INPUT') {
+    event.stopPropagation();
+    event.preventDefault();
+  }
+  // console.log(`${event.code} ${event.keyCode}`);
+  key_state[code] = DOWN_EDGE;
+}
+
+let temp_delta = vec2();
+function onMouseMove(event, no_stop) {
+  if (touch_mode) {
+    local_storage.setJSON('touch_mode', false);
+    touch_mode = false;
+  }
+  if (event.target.tagName !== 'INPUT' && !no_stop) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  if (event.offsetX !== undefined) {
+    mouse_pos[0] = event.offsetX;
+    mouse_pos[1] = event.offsetY;
+  } else {
+    mouse_pos[0] = event.layerX;
+    mouse_pos[1] = event.layerY;
+  }
+  mouse_pos_is_touch = false;
+
+  let any_movement = false;
+  if (pointerLocked()) {
+    if (event.movementX || event.movementY) {
+      v2set(temp_delta, event.movementX, event.movementY);
+      any_movement = true;
+    }
+  } else {
+    v2sub(temp_delta, mouse_pos, last_mouse_pos);
+    if (temp_delta[0] || temp_delta[1]) {
+      any_movement = true;
+    }
+  }
+  if (any_movement) {
+    for (let button = POINTERLOCK; button < mouse_down.length; ++button) {
+      if (mouse_down[button] || button === POINTERLOCK && pointerLocked()) {
+        let touch_data = touches[`m${button}`];
+        if (touch_data) {
+          v2add(touch_data.delta, touch_data.delta, temp_delta);
+          touch_data.total += abs(temp_delta[0]) + abs(temp_delta[1]);
+          v2copy(touch_data.cur_pos, mouse_pos);
+        }
+      }
+    }
+  }
+  v2copy(last_mouse_pos, mouse_pos);
+}
+
+function onMouseDown(event) {
+  onMouseMove(event); // update mouse_pos
+  glov_engine.sound_manager.resume();
+
+  let button = event.button;
+  mouse_down[button] = mouse_pos.slice(0);
+  let touch_id = `m${button}`;
+  if (touches[touch_id]) {
+    v2copy(touches[touch_id].start_pos, mouse_pos);
+    touches[touch_id].release = false;
+  } else {
+    touches[touch_id] = new TouchData(mouse_pos, false, button);
+  }
+}
+
+function onMouseUp(event) {
+  onMouseMove(event); // update mouse_pos
+  let no_click = event.target.tagName === 'INPUT';
+  let button = event.button;
+  if (mouse_down[button]) {
+    let touch_id = `m${button}`;
+    let touch_data = touches[touch_id];
+    if (touch_data) {
+      v2copy(touch_data.cur_pos, mouse_pos);
+      if (!no_click) {
+        touch_data.state = UP_EDGE;
+      }
+      touch_data.release = true;
+    }
+    delete mouse_down[button];
+  }
+}
+
+function onWheel(event) {
+  onMouseMove(event, true);
+  if (event.wheelDelta > 0) {
+    mouse_wheel++;
+  } else if (event.wheelDelta < 0) {
+    mouse_wheel--;
+  }
+}
+
+let touch_pos = vec2();
+function onTouchChange(event) {
+  glov_engine.sound_manager.resume();
+  if (!touch_mode) {
+    local_storage.set('touch_mode', true);
+    touch_mode = true;
+  }
+  if (event.cancelable !== false) {
+    event.preventDefault();
+  }
+  let ct = event.touches;
+  let seen = {};
+
+  let new_count = ct.length;
+  let old_count = new_count;
+  // Look for press and movement
+  for (let ii = 0; ii < new_count; ++ii) {
+    let touch = ct[ii];
+    let last_touch = touches[touch.identifier];
+    v2set(touch_pos, touch.clientX, touch.clientY);
+    if (!last_touch) {
+      last_touch = touches[touch.identifier] = new TouchData(touch_pos, true, 0);
+      --old_count;
+    } else {
+      v2sub(temp_delta, touch_pos, last_touch.cur_pos);
+      v2add(last_touch.delta, last_touch.delta, temp_delta);
+      last_touch.total += abs(temp_delta[0]) + abs(temp_delta[1]);
+      v2copy(last_touch.cur_pos, touch_pos);
+    }
+    seen[touch.identifier] = true;
+    if (TOUCH_AS_MOUSE && new_count === 1) {
+      // Single touch, treat as mouse movement
+      v2copy(mouse_pos, touch_pos);
+      mouse_pos_is_touch = true;
+    }
+  }
+  // Look for release, if releasing exactly one final touch
+  let released_touch;
+  for (let id in touches) {
+    if (!seen[id]) {
+      let touch = touches[id];
+      if (touch.touch) {
+        ++old_count;
+        released_touch = touch;
+        touch.state = UP_EDGE;
+        touch.release = true;
+      }
+    }
+  }
+  if (TOUCH_AS_MOUSE) {
+    if (old_count === 1 && new_count === 0) {
+      delete mouse_down[0];
+      v2copy(mouse_pos, released_touch.cur_pos);
+      mouse_pos_is_touch = true;
+    } else if (new_count === 1) {
+      let touch = ct[0];
+      if (!old_count) {
+        mouse_down[0] = vec2(touch.clientX, touch.clientY);
+      }
+      v2set(mouse_pos, touch.clientX, touch.clientY);
+      mouse_pos_is_touch = true;
+    } else if (new_count > 1) {
+      // multiple touches, release mouse_down without emitting click
+      delete mouse_down[0];
+    }
+  }
+}
+
+export function startup(_canvas) {
+  canvas = _canvas;
+
+  let passive_param = false;
+  try {
+    let opts = Object.defineProperty({}, 'passive', {
+      get: function () {
+        passive_param = { passive: false };
+        return false;
+      }
+    });
+    window.addEventListener('test', null, opts);
+    window.removeEventListener('test', null, opts);
+  } catch (e) {
+    passive_param = false;
+  }
+
+  canvas.requestPointerLock = canvas.requestPointerLock || canvas.mozRequestPointerLock ||
+    canvas.webkitRequestPointerLock;
+  document.exitPointerLock = document.exitPointerLock || document.mozExitPointerLock ||
+    document.webkitExitPointerLock || function () { /* nop */ };
+
+  window.addEventListener('keydown', onKeyDown, false);
+  window.addEventListener('keyup', onKeyUp, false);
+
+  window.addEventListener('click', ignored, false);
+  window.addEventListener('contextmenu', ignored, false);
+  window.addEventListener('mousemove', onMouseMove, false);
+  window.addEventListener('mousedown', onMouseDown, false);
+  window.addEventListener('mouseup', onMouseUp, false);
+  window.addEventListener('DOMMouseScroll', onWheel, false);
+  window.addEventListener('mousewheel', onWheel, false);
+
+  canvas.addEventListener('touchstart', onTouchChange, passive_param);
+  canvas.addEventListener('touchmove', onTouchChange, passive_param);
+  canvas.addEventListener('touchend', onTouchChange, passive_param);
+  canvas.addEventListener('touchcancel', onTouchChange, passive_param);
+}
+
+
+const DEADZONE = 0.26;
+const DEADZONE_SQ = DEADZONE * DEADZONE;
+const NUM_STICKS = 2;
+const PAD_THRESHOLD = 0.25; // for turning analog motion into digital events
+
+function getGamepadData(idx) {
+  let gpd = gamepad_data[idx];
+  if (!gpd) {
+    gpd = gamepad_data[idx] = {
+      timestamp: 0,
+      sticks: new Array(NUM_STICKS),
+    };
+    for (let ii = 0; ii < NUM_STICKS; ++ii) {
+      gpd.sticks[ii] = vec2();
+    }
+    pad_states[idx] = {};
+  }
+  return gpd;
+}
+
+function updatePadState(ps, b, c) {
+  if (b && !ps[c]) {
+    ps[c] = DOWN_EDGE;
+  } else if (!b && ps[c]) {
+    ps[c] = UP_EDGE;
+  }
+}
+
+function gamepadUpdate() {
+  let gamepads = (navigator.gamepads ||
+    navigator.webkitGamepads ||
+    (navigator.getGamepads && navigator.getGamepads()) ||
+    (navigator.webkitGetGamepads && navigator.webkitGetGamepads()));
+
+  if (gamepads) {
+    let numGamePads = gamepads.length;
+    for (let ii = 0; ii < numGamePads; ii++) {
+      let gamepad = gamepads[ii];
+      if (!gamepad) {
+        continue;
+      }
+      let gpd = getGamepadData(ii);
+      let ps = pad_states[ii];
+      // Update button states
+      if (gpd.timestamp < gamepad.timestamp) {
+        let buttons = gamepad.buttons;
+        gpd.timestamp = gamepad.timestamp;
+
+        let numButtons = buttons.length;
+        for (let n = 0; n < numButtons; n++) {
+          let value = buttons[n];
+          if (typeof value === 'object') {
+            value = value.value;
+          }
+          value = value > 0.5;
+          updatePadState(ps, value, n);
+        }
+      }
+
+      // Update axes states
+      let axes = gamepad.axes;
+      if (axes.length >= NUM_STICKS * 2) {
+        for (let n = 0; n < NUM_STICKS; ++n) {
+          let pair = gpd.sticks[n];
+          v2set(pair, axes[n*2], -axes[n*2 + 1]);
+          let magnitude = v2lengthSq(pair);
+          if (magnitude > DEADZONE_SQ) {
+            magnitude = sqrt(magnitude);
+
+            // Normalize lX and lY
+            v2scale(pair, pair, 1 / magnitude);
+
+            // Clip the magnitude at its max possible value
+            magnitude = min(magnitude, 1);
+
+            // Adjust magnitude relative to the end of the dead zone
+            magnitude = ((magnitude - DEADZONE) / (1 - DEADZONE));
+
+            v2scale(pair, pair, magnitude);
+          } else {
+            v2set(pair, 0, 0);
+          }
+        }
+
+        // Calculate virtual directional buttons
+        updatePadState(ps, gpd.sticks[0][0] < -PAD_THRESHOLD, pad_codes.ANALOG_LEFT);
+        updatePadState(ps, gpd.sticks[0][0] > PAD_THRESHOLD, pad_codes.ANALOG_RIGHT);
+        updatePadState(ps, gpd.sticks[0][1] < -PAD_THRESHOLD, pad_codes.ANALOG_DOWN);
+        updatePadState(ps, gpd.sticks[0][1] > PAD_THRESHOLD, pad_codes.ANALOG_UP);
+      }
+    }
+  }
+}
+
+export function tick() {
+  // browser frame has occurred since the call to endFrame(),
+  // we should now have `touches` and `key_state` populated with edge events
+  mouse_over_captured = false;
+  gamepadUpdate();
+  if (touches[pointerlock_touch_id] && !pointerLocked()) {
+    pointerLockExit();
+  }
+}
+
+function endFrameTickMap(map) {
+  Object.keys(map).forEach((keycode) => {
+    switch (map[keycode]) {
+      case DOWN_EDGE:
+        map[keycode] = DOWN;
+        break;
+      case UP_EDGE:
+        delete map[keycode];
+        break;
+      default:
+    }
+  });
+}
+export function endFrame() {
+  endFrameTickMap(key_state);
+  pad_states.forEach(endFrameTickMap);
+  for (let touch_id in touches) {
+    let touch_data = touches[touch_id];
+    if (touch_data.release) {
+      delete touches[touch_id];
+    } else {
+      touch_data.delta[0] = touch_data.delta[1] = 0;
+      touch_data.dispatched = false;
+      if (touch_data.state === DOWN_EDGE) {
+        touch_data.state = DOWN;
+      } else {
+        assert(touch_data.state !== UP_EDGE); // should also have set .release!
+      }
+    }
+  }
+  mouse_wheel = 0;
+  input_eaten_kb = false;
+  input_eaten_mouse = false;
+}
+
+export function eatAllInput() {
+  // destroy touches, remove all down and up edges
+  endFrame();
+  mouse_over_captured = true;
+  input_eaten_kb = true;
+  input_eaten_mouse = true;
+}
+
+export function eatAllKeyboardInput() {
+  let touches_save = touches;
+  let over_save = mouse_over_captured;
+  let eaten_mouse_save = input_eaten_mouse;
+  eatAllInput();
+  touches = touches_save;
+  mouse_over_captured = over_save;
+  input_eaten_mouse = eaten_mouse_save;
+}
+
+// returns position mapped to current camera view
+export function mousePos(dst) {
+  dst = dst || vec2();
+  camera2d.physicalToVirtual(dst, mouse_pos);
+  return dst;
+}
+
+export function mouseWheel() {
+  let ret = mouse_wheel;
+  mouse_wheel = 0;
+  return ret;
+}
+
+function mousePosParam(param) {
+  param = param || {};
+  return {
+    x: param.x === undefined ? camera2d.x0() : param.x,
+    y: param.y === undefined ? camera2d.y0() : param.y,
+    w: param.w === undefined ? camera2d.w() : param.w,
+    h: param.h === undefined ? camera2d.h() : param.h,
+    button: param.button === undefined ? ANY : param.button,
+  };
+}
+
+let check_pos = vec2();
+function checkPos(pos, param) {
+  camera2d.physicalToVirtual(check_pos, pos);
+  return check_pos[0] >= param.x && (param.w === Infinity || check_pos[0] < param.x + param.w) &&
+    check_pos[1] >= param.y && (param.h === Infinity || check_pos[1] < param.y + param.h);
+}
+
+export function mouseOver(param) {
+  if (mouse_over_captured) {
+    return false;
+  }
+  let pos_param = mousePosParam(param);
+
+  // eat mouse up/down events
+  for (let id in touches) {
+    let touch = touches[id];
+    if (checkPos(touch.cur_pos, pos_param)) {
+      if (touch.state === DOWN_EDGE) {
+        touch.state = DOWN;
+      } else if (touch.state === UP_EDGE) {
+        touch.state = null;
+      }
+    }
+  }
+
+  if (checkPos(mouse_pos, pos_param)) {
+    mouse_over_captured = true;
+    return true;
+  }
+  return false;
+}
+
+export function mouseDown(button) {
+  if (button === ANY) {
+    return mouseDown(0) || mouseDown(2);
+  }
+  button = button || 0;
+  return !input_eaten_mouse && mouse_down[button];
+}
+
+export function mousePosIsTouch() {
+  return mouse_pos_is_touch;
+}
+
+export function isTouchDown(param) {
+  if (input_eaten_mouse) {
+    return false;
+  }
+  let pos_param = mousePosParam(param);
+  for (let id in touches) {
+    let touch = touches[id];
+    if (checkPos(touch.cur_pos, pos_param)) {
+      return check_pos.slice(0);
+    }
+  }
+  return false;
+}
+
+export function numTouches() {
+  return Object.keys(touches).length;
+}
+
+export function keyDown(keycode) {
+  if (input_eaten_kb) {
+    return false;
+  }
+  return Boolean(key_state[keycode]);
+}
+export function keyDownEdge(keycode) {
+  if (key_state[keycode] === DOWN_EDGE) {
+    key_state[keycode] = DOWN;
+    return true;
+  }
+  return false;
+}
+export function keyUpEdge(keycode) {
+  if (key_state[keycode] === UP_EDGE) {
+    delete key_state[keycode];
+    return true;
+  }
+  return false;
+}
+
+export function padGetAxes(out, stickindex, padindex) {
+  assert(stickindex >= 0 && stickindex < NUM_STICKS);
+  if (padindex === undefined) {
+    let sub = vec2();
+    v2set(out, 0, 0);
+    for (let ii = 0; ii < gamepad_data.length; ++ii) {
+      padGetAxes(sub, stickindex, ii);
+      v2add(out, sub);
+    }
+    return;
+  }
+  let sticks = getGamepadData(padindex).sticks;
+  v2copy(out, sticks[stickindex]);
+}
+
+function padButtonDownInternal(ps, padcode) {
+  return Boolean(ps[padcode]);
+}
+function padButtonDownEdgeInternal(ps, padcode) {
+  if (ps[padcode] === DOWN_EDGE) {
+    ps[padcode] = DOWN;
+    return true;
+  }
+  return false;
+}
+function padButtonUpEdgeInternal(ps, padcode) {
+  if (ps[padcode] === UP_EDGE) {
+    delete ps[padcode];
+    return true;
+  }
+  return false;
+}
+
+const ANALOG_MAP = (function () {
+  if (!MAP_ANALOG_TO_DPAD) {
+    return {};
+  }
+  let r = {};
+  r[pad_codes.LEFT] = pad_codes.ANALOG_LEFT;
+  r[pad_codes.RIGHT] = pad_codes.ANALOG_RIGHT;
+  r[pad_codes.UP] = pad_codes.ANALOG_UP;
+  r[pad_codes.DOWN] = pad_codes.ANALOG_DOWN;
+  return r;
+}());
+function padButtonShared(fn, padcode, padindex) {
+  assert(padcode !== undefined);
+  // Handle calling without a specific pad index
+  if (padindex === undefined) {
+    for (let ii = 0; ii < pad_states.length; ++ii) {
+      if (padButtonShared(fn, padcode, ii)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  if (input_eaten_mouse) {
+    return false;
+  }
+  let ps = pad_states[padindex];
+  if (!ps) {
+    return false;
+  }
+
+  if (ANALOG_MAP[padcode] && fn(ps, ANALOG_MAP[padcode])) {
+    return true;
+  }
+  return fn(ps, padcode);
+}
+export function padButtonDown(padcode, padindex) {
+  return padButtonShared(padButtonDownInternal, padcode, padindex);
+}
+export function padButtonDownEdge(padcode, padindex) {
+  return padButtonShared(padButtonDownEdgeInternal, padcode, padindex);
+}
+export function padButtonUpEdge(padcode, padindex) {
+  return padButtonShared(padButtonUpEdgeInternal, padcode, padindex);
+}
+
+let start_pos = vec2();
+let cur_pos = vec2();
+let delta = vec2();
+
+export function mouseUpEdge(param) {
+  param = param || {};
+  let pos_param = mousePosParam(param);
+  let button = pos_param.button;
+  let max_click_dist = param.max_dist || 50; // TODO: relative to camera distance?
+
+  for (let touch_id in touches) {
+    let touch_data = touches[touch_id];
+    if (touch_data.state !== UP_EDGE ||
+      !(button === ANY || button === touch_data.button) ||
+      touch_data.total > max_click_dist
+    ) {
+      continue;
+    }
+    if (checkPos(touch_data.cur_pos, pos_param)) {
+      touch_data.state = null;
+      return {
+        button: touch_data.button,
+        pos: check_pos.slice(0),
+        start_time: touch_data.start_time,
+      };
+    }
+  }
+  return false;
+}
+exports.click = mouseUpEdge;
+
+export function mouseDownEdge(param) {
+  param = param || {};
+  let pos_param = mousePosParam(param);
+  let button = pos_param.button;
+
+  for (let touch_id in touches) {
+    let touch_data = touches[touch_id];
+    if (touch_data.state !== DOWN_EDGE ||
+      !(button === ANY || button === touch_data.button)
+    ) {
+      continue;
+    }
+    if (checkPos(touch_data.cur_pos, pos_param)) {
+      touch_data.state = DOWN;
+      return {
+        button: touch_data.button,
+        pos: check_pos.slice(0),
+        start_time: touch_data.start_time,
+      };
+    }
+  }
+  return false;
+}
+
+export function drag(param) {
+  param = param || {};
+  let pos_param = mousePosParam(param);
+  let button = pos_param.button;
+
+  for (let touch_id in touches) {
+    let touch_data = touches[touch_id];
+    if (!(button === ANY || button === touch_data.button) || touch_data.dispatched) {
+      continue;
+    }
+    if (checkPos(touch_data.start_pos, pos_param)) {
+      if (!param.peek) {
+        touch_data.dispatched = true;
+      }
+      camera2d.physicalToVirtual(start_pos, touch_data.start_pos);
+      camera2d.physicalToVirtual(cur_pos, touch_data.cur_pos);
+      camera2d.physicalDeltaToVirtual(delta, [touch_data.total/2, touch_data.total/2]);
+      let total = delta[0] + delta[1];
+      camera2d.physicalDeltaToVirtual(delta, touch_data.delta);
+      return {
+        cur_pos,
+        start_pos,
+        delta, // this frame's delta
+        total, // total (linear) distance dragged
+        button: touch_data.button,
+        touch: touch_data.touch,
+        start_time: touch_data.start_time,
+      };
+    }
+  }
+  return null;
 }

@@ -10,6 +10,7 @@ module.exports = {
     // Just the super-common ones, don't mask undefined variables named "status", etc
     "window": true,
     "document": true,
+    "gl": true,
   },
   "extends": "eslint:recommended",
   "parserOptions": {
@@ -193,6 +194,7 @@ module.exports = {
     "no-confusing-arrow": "error",
     "no-console": "off", // JE
     "no-const-assign": "error",
+    "no-constant-condition": "off", // JE
     "no-control-regex": "error",
     "no-continue": "off", // JE
     "no-debugger": "error",

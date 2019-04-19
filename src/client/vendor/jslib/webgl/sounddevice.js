@@ -148,7 +148,7 @@ var WebGLSound = (function () {
 
     WebGLSound.prototype._initializeFromData = function (data, extension, onload) {
         if (typeof Blob !== "undefined" && data instanceof Blob) {
-            debug.assert(typeof URL !== "undefined" && URL.createObjectURL);
+            assert(typeof URL !== "undefined" && URL.createObjectURL);
             if (data.type === 'audio/x-mpg') {
                 data = data.slice(0, data.size, 'audio/mpeg');
             }
@@ -184,7 +184,7 @@ var WebGLSound = (function () {
                         dataBlob = new Blob([dataArray], { type: "audio/mpeg" });
                     }
                 }
-                debug.assert(dataArray.length === dataBlob.size, "Blob constructor does not support typed arrays.");
+                assert(dataArray.length === dataBlob.size, "Blob constructor does not support typed arrays.");
                 this.blob = dataBlob;
                 this.url = URL.createObjectURL(dataBlob);
             } else {
@@ -429,7 +429,7 @@ var WebGLSound = (function () {
                                             }
                                             /* tslint:enable:no-bitwise */
                                         }
-                                        debug.assert(data);
+                                        assert(data);
                                         sound._initializeFromData(data, extension, onload);
                                     } else if (onload) {
                                         onload(null, xhrStatus);

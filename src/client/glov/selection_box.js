@@ -1,11 +1,11 @@
 /* eslint complexity:off */
 /*global Z: false */
-/*global VMath: false */
 const assert = require('assert');
 const glov_engine = require('./engine.js');
+const glov_input = require('./input.js');
 const glov_font = require('./font.js');
-let glov_ui;
-let glov_input;
+const glov_ui = require('./ui.js');
+const { vec4 } = require('./vmath.js');
 let glov_markup = null; // Not ported
 
 const { min, max, sin } = Math;
@@ -45,10 +45,10 @@ export const default_display = {
 };
 
 
-const color_gray50 = VMath.v4Build(0.313, 0.313, 0.313, 1.000);
-// const color_gray80 = VMath.v4Build(0.500, 0.500, 0.500, 1.000);
-const color_grayD0 = VMath.v4Build(0.816, 0.816, 0.816, 1.000);
-const color_white = VMath.v4Build(1, 1, 1, 1);
+const color_gray50 = vec4(0.313, 0.313, 0.313, 1.000);
+// const color_gray80 = vec4(0.500, 0.500, 0.500, 1.000);
+const color_grayD0 = vec4(0.816, 0.816, 0.816, 1.000);
+const color_white = vec4(1, 1, 1, 1);
 
 const SELBOX_BOUNCE_TIME = 80;
 
@@ -163,7 +163,7 @@ class GlovSelectionBox {
   run(params) {
     this.applyParams(params);
     let { x, y, z, width, font_height, entry_height, auto_reset } = this;
-    let { key_codes, pad_codes } = glov_input;
+    let { KEYS, pad_codes } = glov_input;
 
     if (auto_reset && this.expected_frame_index !== glov_engine.getFrameIndex()) {
       // Reset, select first non-disabled entry
@@ -243,46 +243,46 @@ class GlovSelectionBox {
     let page_size = (this.scroll_height - 1) / entry_height;
 
     if (focused) {
-      if (glov_input.keyDownHit(key_codes.PAGEDOWN) ||
-        (glov_input.isPadButtonDown(pad_codes.RIGHTTRIGGER) || glov_input.isPadButtonDown(pad_codes.LEFTTRIGGER)) &&
-        glov_input.padDownHit(pad_codes.DOWN)
+      if (glov_input.keyDownEdge(KEYS.PAGEDOWN) ||
+        (glov_input.padButtonDown(pad_codes.RIGHT_TRIGGER) || glov_input.padButtonDown(pad_codes.LEFT_TRIGGER)) &&
+        glov_input.padButtonDownEdge(pad_codes.DOWN)
       ) {
         eff_sel += page_size;
         eff_sel = min(eff_sel, num_non_disabled_selections - 1);
         this.mouse_mode = false;
         pos_changed = true;
       }
-      if (glov_input.keyDownHit(key_codes.PAGEUP) ||
-        (glov_input.isPadButtonDown(pad_codes.RIGHTTRIGGER) || glov_input.isPadButtonDown(pad_codes.LEFTTRIGGER)) &&
-        glov_input.padDownHit(pad_codes.UP)
+      if (glov_input.keyDownEdge(KEYS.PAGEUP) ||
+        (glov_input.padButtonDown(pad_codes.RIGHT_TRIGGER) || glov_input.padButtonDown(pad_codes.LEFT_TRIGGER)) &&
+        glov_input.padButtonDownEdge(pad_codes.UP)
       ) {
         eff_sel -= page_size;
         eff_sel = max(eff_sel, 0);
         this.mouse_mode = false;
         pos_changed = true;
       }
-      if (glov_input.keyDownHit(key_codes.DOWN) ||
-        glov_input.keyDownHit(key_codes.s) ||
-        glov_input.padDownHit(pad_codes.DOWN)
+      if (glov_input.keyDownEdge(KEYS.DOWN) ||
+        glov_input.keyDownEdge(KEYS.S) ||
+        glov_input.padButtonDownEdge(pad_codes.DOWN)
       ) {
         eff_sel++;
         this.mouse_mode = false;
         pos_changed = true;
       }
-      if (glov_input.keyDownHit(key_codes.UP) ||
-        glov_input.keyDownHit(key_codes.w) ||
-        glov_input.padDownHit(pad_codes.UP)
+      if (glov_input.keyDownEdge(KEYS.UP) ||
+        glov_input.keyDownEdge(KEYS.W) ||
+        glov_input.padButtonDownEdge(pad_codes.UP)
       ) {
         eff_sel--;
         this.mouse_mode = false;
         pos_changed = true;
       }
-      if (glov_input.keyDownHit(key_codes.HOME)) {
+      if (glov_input.keyDownEdge(KEYS.HOME)) {
         eff_sel = 0;
         this.mouse_mode = false;
         pos_changed = true;
       }
-      if (glov_input.keyDownHit(key_codes.END)) {
+      if (glov_input.keyDownEdge(KEYS.END)) {
         eff_sel = num_non_disabled_selections - 1;
         this.mouse_mode = false;
         pos_changed = true;
@@ -332,7 +332,7 @@ class GlovSelectionBox {
       //   entry_height;
       // let dropdown_x = x + width - dropdown_width;
       //int dropdown_w = glov_ui_menu_header.right.GetTileWidth();
-      if (!this.disabled && glov_input.clickHit({
+      if (!this.disabled && glov_input.click({
         x, y,
         w: width, h: entry_height
       })) {
@@ -340,7 +340,7 @@ class GlovSelectionBox {
         this.dropdown_visible = !this.dropdown_visible;
         color0 = color_grayD0;
         // color1 = color_gray80;
-      } else if (!this.disabled && glov_input.isMouseOver({
+      } else if (!this.disabled && glov_input.mouseOver({
         x, y, w: width, h: entry_height
       })) {
         glov_ui.setMouseOver(this);
@@ -399,7 +399,7 @@ class GlovSelectionBox {
         let item = this.items[i];
         let entry_disabled = item.disabled;
         let image_set = null;
-        if (!this.disabled && !entry_disabled && glov_input.clickHit({
+        if (!this.disabled && !entry_disabled && glov_input.click({
           x, y, w: width, h: entry_height
         })) {
           glov_ui.focusSteal(this);
@@ -407,7 +407,7 @@ class GlovSelectionBox {
           this.mouse_mode = true;
           this.selected = i;
         }
-        if (!this.disabled && !entry_disabled &&glov_input.clickHit({
+        if (!this.disabled && !entry_disabled &&glov_input.click({
           x, y, w: width, h: entry_height
         })) {
           glov_ui.focusSteal(this);
@@ -416,7 +416,7 @@ class GlovSelectionBox {
           this.selected = i;
         }
         let is_mouseover = false;
-        if (!this.disabled && !entry_disabled && glov_input.isMouseOver({
+        if (!this.disabled && !entry_disabled && glov_input.mouseOver({
           x, y, w: width, h: entry_height
         })) {
           let mpos = glov_input.mousePos();
@@ -444,7 +444,7 @@ class GlovSelectionBox {
         if (this.selected === i && show_selection) {
           style = display.style_selected || selbox_font_style_selected;
           image_set = glov_ui.sprites.menu_selected;
-          if (is_mouseover && glov_input.isMouseDown()) {
+          if (is_mouseover && glov_input.mouseDown()) {
             if (glov_ui.sprites.menu_down) {
               image_set = glov_ui.sprites.menu_down;
             } else {
@@ -569,9 +569,7 @@ class GlovSelectionBox {
 
 
 export function create(...args) {
-  if (!glov_ui) {
-    glov_ui = glov_engine.glov_ui;
-    glov_input = glov_engine.glov_input;
+  if (!font) {
     font = glov_ui.font;
   }
   return new GlovSelectionBox(...args);

@@ -1,5 +1,5 @@
 {
-  "name": "nextgen",
+  "name": "glovjs-playground",
   "version": "0.0.2",
   "description": "Template for a state of the art Javascript project using Turbulenz",
   "main": "build/server/index.js",
@@ -28,6 +28,8 @@
   "license": "MIT",
   "dependencies": {
     "express": "^4.16.4",
+    "gl-mat3": "^2.0.0",
+    "gl-mat4": "^1.2.0",
     "random-seed": "^0.3.0"
   },
   "devDependencies": {
@@ -43,6 +45,7 @@
     "gulp-eslint": "^5.0.0",
     "gulp-if": "^2.0.2",
     "gulp-nodemon": "^2.4.1",
+    "gulp-replace": "^1.0.0",
     "gulp-sourcemaps": "^2.6.0",
     "gulp-uglify": "^3.0.1",
     "gulp-useref": "^3.1.6",
@@ -50,6 +53,6 @@
     "uglify-js": "3.4.7",
     "vinyl-buffer": "^1.0.0",
     "vinyl-source-stream": "^1.1.0",
-    "watchify": "^3.9.0"
+    "watchify": "3.11.0"
   }
 }

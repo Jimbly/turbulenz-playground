@@ -18,7 +18,7 @@
   <body>
     <div id="debug"></div>
     <div id="content">
-      <canvas id="turbulenz_game_engine_canvas" moz-opaque="true" tabindex="1">
+      <canvas id="canvas" moz-opaque="true" tabindex="1">
         Sorry, but your browser does not support WebGL or does not have it
         enabled.  To get a WebGL-enabled browser, please see:<br/>
         <a href="http://www.khronos.org/webgl/wiki/Getting_a_WebGL_Implementation" target="_blank">
@@ -69,27 +69,11 @@
         <div id="dynamic_text"></div>
       </div>
     </div>
-    <script type="text/javascript">
-      /* eslint indent:off, no-multiple-empty-lines:off, no-trailing-spaces:off, eol-last:off */
-      /* global window */
-      window.TurbulenzEngine = {};
-    </script>
     <!-- build:js vendor/combined.js -->
-    <script src="vendor/jquery-3.2.1.min.js"></script>
+    <script src="vendor/polyfill.js"></script>
     <script src="vendor/jslib/debug.js"></script>
-    <script src="vendor/jslib/webgl/turbulenzengine.js"></script>
-    <script src="vendor/jslib/webgl/graphicsdevice.js"></script>
-    <script src="vendor/jslib/webgl/touch.js"></script>
-    <script src="vendor/jslib/webgl/touchevent.js"></script>
     <script src="vendor/jslib/webgl/sounddevice.js"></script>
-    <script src="vendor/jslib/webgl/inputdevice.js"></script>
-    <script src="vendor/jslib/camera.js"></script>
     <script src="vendor/jslib/vmath.js"></script>
-    <script src="vendor/jslib/utilities.js"></script>
-    <script src="vendor/jslib/observer.js"></script>
-    <script src="vendor/jslib/requesthandler.js"></script>
-    <script src="vendor/jslib/texturemanager.js"></script>
-    <script src="vendor/jslib/webgl/mathdevice.js"></script>
     <!-- endbuild -->
 
     <script src="wrapper.bundle.js"></script>

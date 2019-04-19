@@ -1,6 +1,4 @@
-/*global TurbulenzEngine: true */
-/*global VMath: false */
-/*global Camera: false */
+/*global WebGLSoundDevice: true */
 
 const DEFAULT_FADE_RATE = 0.001;
 
@@ -9,18 +7,19 @@ let num_loading = 0;
 class SoundManager {
   constructor(listenerTransform) {
     if (!listenerTransform) {
-      const camera = Camera.create(VMath);
-      const look_at_position = VMath.v3Build(0.0, 0.0, 0.0);
-      const worldUp = VMath.v3BuildYAxis();
-      const camera_position = VMath.v3Build(0.0, 0.0, 1.0);
-      camera.lookAt(look_at_position, worldUp, camera_position);
-      camera.updateViewMatrix();
-      listenerTransform = camera.matrix;
+      // const camera = Camera.create(VMath);
+      // const look_at_position = VMath.v3Build(0, 1, 0);
+      // const worldUp = VMath.v3Build(0, 0, 1);
+      // const camera_position = VMath.v3Build(0, 0, 0);
+      // camera.lookAt(look_at_position, worldUp, camera_position);
+      // camera.updateViewMatrix();
+      // listenerTransform = camera.matrix;
+      listenerTransform = new Float32Array([1, 0, -0, 0, 0, 1, 0, -1, 0, 0, 0, 0]);
     }
     let soundDeviceParameters = {
       linearDistance: false
     };
-    this.soundDevice = TurbulenzEngine.createSoundDevice(soundDeviceParameters);
+    this.soundDevice = WebGLSoundDevice.create(soundDeviceParameters);
     this.soundDevice.listenerTransform = listenerTransform;
     this.auto_oggs = false; // try loading .ogg versions first, then fallback to .wav
     this.auto_mp3s = false; // try loading .mp3 versions first, then fallback to .wav

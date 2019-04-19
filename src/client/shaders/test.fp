@@ -1,14 +1,8 @@
-//#pragma WebGL
-#ifdef GL_ES
-#define TZ_LOWP lowp
 precision mediump float;
 precision mediump int;
-#else
-#define TZ_LOWP
-#endif
 
-varying TZ_LOWP vec4 tz_Color;
-varying vec4 tz_TexCoord[1];
+varying lowp vec4 interp_color;
+varying highp vec2 interp_texcoord;
 uniform vec4 params;
 
 // Partially From: https://www.shadertoy.com/view/lsl3RH
@@ -86,11 +80,11 @@ vec3 doMagic(vec2 p)
 
   float f = func(q);
 
-  vec3 col = mix(tz_Color.rgb, params.rgb, f );
+  vec3 col = mix(interp_color.rgb, params.rgb, f );
   return col;
 }
 
 void main()
 {
-  gl_FragColor = vec4( doMagic( tz_TexCoord[0].xy ), 1.0 );
+  gl_FragColor = vec4( doMagic( interp_texcoord ), 1.0 );
 }

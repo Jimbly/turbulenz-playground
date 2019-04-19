@@ -1,16 +1,15 @@
 /* eslint no-bitwise:off */
 /* eslint complexity:off */
 /* eslint no-shadow:off */
-/*global assert: true */
-/*global VMath: false */
 
+const assert = require('assert');
+const camera2d = require('./camera2d.js');
 const fs = require('fs');
-let VMathArrayConstructor = VMath.F32Array;
-
-const { clamp } = require('../../common/util.js');
 const { floor, max, round } = Math;
-
-const { v4Build, v4BuildZero, v4ScalarMul } = VMath;
+const shaders = require('./shaders.js');
+const sprites = require('./sprites.js');
+const textures = require('./textures.js');
+const { clamp, vec4, v4clone, v4scale } = require('./vmath.js');
 
 /*
 
@@ -127,6 +126,8 @@ GlovFontDefaultStyle.prototype.color_mode = COLOR_MODE.SINGLE;
 class GlovFontStyle extends GlovFontDefaultStyle {
 }
 
+export const font_shaders = {};
+
 export function intColorFromVec4Color(v) {
   return ((v[0] * 255 | 0) << 24) |
     ((v[1] * 255 | 0) << 16) |
@@ -142,7 +143,7 @@ export function vec4ColorFromIntColor(v, c) {
 }
 
 function buildVec4ColorFromIntColor(c) {
-  return v4Build(
+  return vec4(
     ((c >> 24) & 0xFF) / 255,
     ((c >> 16) & 0xFF) / 255,
     ((c >> 8) & 0xFF) / 255,
@@ -184,26 +185,24 @@ export function styleAlpha(font_style, alpha) {
   });
 }
 
-let gd_params = null;
 let tech_params = null;
 let tech_params_dirty = false;
 let temp_color = null;
 
-function createTechniqueParameters(draw_2d) {
+function createTechniqueParameters() {
   if (tech_params) {
     return;
   }
 
   tech_params = {
-    clipSpace: draw_2d.clipSpace,
-    param0: new VMathArrayConstructor(4),
-    outlineColor: new VMathArrayConstructor(4),
-    glowColor: new VMathArrayConstructor(4),
-    glowParams: new VMathArrayConstructor(4),
+    param0: vec4(),
+    outlineColor: vec4(),
+    glowColor: vec4(),
+    glowParams: vec4(),
     tex0: null
   };
   if (!temp_color) {
-    temp_color = new VMathArrayConstructor(4);
+    temp_color = vec4();
   }
 }
 
@@ -214,12 +213,10 @@ function techParamsSet(param, value) {
     if (tpv[0] !== value[0] || tpv[1] !== value[1] || tpv[2] !== value[2] || tpv[3] !== value[3]) {
       // clone
       tech_params = {
-        clipSpace: tech_params.clipSpace,
-        param0: new VMathArrayConstructor(tech_params.param0),
-        outlineColor: new VMathArrayConstructor(tech_params.outlineColor),
-        glowColor: new VMathArrayConstructor(tech_params.glowColor),
-        glowParams: new VMathArrayConstructor(tech_params.glowParams),
-        tex0: tech_params.tex0,
+        param0: v4clone(tech_params.param0),
+        outlineColor: v4clone(tech_params.outlineColor),
+        glowColor: v4clone(tech_params.glowColor),
+        glowParams: v4clone(tech_params.glowParams),
       };
       tech_params_dirty = true;
       tpv = tech_params[param];
@@ -244,16 +241,18 @@ function techParamsGet() {
 }
 
 class GlovFont {
-  constructor(draw_list, font_info, texture) {
-    assert(gd_params);
-    assert(font_info.font_size!==0); // Got lost somewhere
+  constructor(font_info, texture_name) {
+    assert(font_info.font_size !== 0); // Got lost somewhere
 
-    this.texture = texture;
+    this.texture = textures.load({
+      url: `img/${texture_name}.png`,
+      filter_min: font_info.noFilter ? gl.NEAREST : gl.LINEAR,
+      filter_mag: font_info.noFilter ? gl.NEAREST : gl.LINEAR,
+    });
+    this.textures = [this.texture];
+
     this.font_info = font_info;
-    this.blend_mode = 'font_aa';
-    this.draw_2d = draw_list.draw_2d;
-    this.draw_list = draw_list;
-    this.camera = this.draw_list.camera;
+    this.shader = font_shaders.font_aa;
 
     // Calculate inverse scale
     for (let ii = 0; ii < font_info.char_infos.length; ++ii) {
@@ -277,7 +276,7 @@ class GlovFont {
     this.default_style = new GlovFontStyle();
     this.applied_style = new GlovFontStyle();
 
-    createTechniqueParameters(this.draw_2d);
+    createTechniqueParameters();
   }
 
   // General draw functions return width
@@ -527,7 +526,8 @@ class GlovFont {
     //   _x + xsc * font_info.font_size * 20, y + ysc * font_info.font_size,
     //   1000, [1, 0, 1, 0.5]);
     y += (font_info.y_offset || 0) * ysc;
-    let tex = this.texture.getTexture();
+    let tex = this.texture;
+    let texs = this.textures;
     if (text === null || text === undefined) {
       text = '(null)';
     }
@@ -539,8 +539,8 @@ class GlovFont {
     this.applyStyle(style);
 
     const avg_scale_font = (xsc + ysc) * 0.5;
-    const camera_xscale = this.camera.data[4];
-    const camera_yscale = this.camera.data[5];
+    const camera_xscale = camera2d.data[4];
+    const camera_yscale = camera2d.data[5];
     let avg_scale_combined = (xsc * camera_xscale + ysc * camera_yscale) * 0.5;
     // avg_scale_combined *= glov_settings.render_scale;
 
@@ -555,7 +555,7 @@ class GlovFont {
     // Calculate anti-aliasing values
     let delta_per_source_pixel = 0.5 / font_info.spread;
     let delta_per_dest_pixel = delta_per_source_pixel / avg_scale_combined;
-    let value = v4Build(
+    let value = vec4(
       1 / delta_per_dest_pixel, // AA Mult and Outline Mult
       -0.5 / delta_per_dest_pixel + 0.5, // AA Add
       // Outline Add
@@ -566,7 +566,7 @@ class GlovFont {
       value[2] = 0;
     }
     let padding1 = max(1, applied_style.outline_width*font_texel_scale*avg_scale_combined);
-    let padding4 = v4BuildZero();
+    let padding4 = vec4();
     const outer_scaled = applied_style.glow_outer*font_texel_scale;
     padding4[0] = max(outer_scaled*xsc - applied_style.glow_xoffs*font_texel_scale*xsc, padding1);
     padding4[2] = max(outer_scaled*xsc + applied_style.glow_xoffs*font_texel_scale*xsc, padding1);
@@ -574,7 +574,7 @@ class GlovFont {
     padding4[3] = max(outer_scaled*ysc + applied_style.glow_yoffs*font_texel_scale*ysc, padding1);
 
     techParamsSet('param0', value);
-    let value2 = v4Build(
+    let value2 = vec4(
       0, // filled later
       0, // filled later
       // Glow mult
@@ -586,7 +586,8 @@ class GlovFont {
       value2[3] = 0;
     }
 
-    let padding_in_font_space = v4ScalarMul(padding4, 1 / avg_scale_font);
+    let padding_in_font_space = vec4();
+    v4scale(padding_in_font_space, padding4, 1 / avg_scale_font);
     for (let ii = 0; ii < 4; ++ii) {
       if (padding_in_font_space[ii] > font_info.spread) {
         // Not enough buffer
@@ -636,13 +637,13 @@ class GlovFont {
           let w = char_info.w * xsc2 + (padding4[0] + padding4[2]) * rel_x_scale;
           let h = char_info.h * ysc2 + (padding4[1] + padding4[3]) * rel_y_scale;
 
-          let elem = this.draw_list.queueraw(
-            tex,
+          sprites.queueraw(
+            texs,
             x - rel_x_scale * padding4[0], y - rel_y_scale * padding4[2] + char_info.yoffs * ysc2,
             z + z_advance * i, w, h,
             u0, v0, u1, v1,
-            buildVec4ColorFromIntColor(applied_style.color), 0, this.blend_mode);
-          elem.tech_params = techParamsGet();
+            buildVec4ColorFromIntColor(applied_style.color),
+            this.shader, techParamsGet());
 
           x += (char_info.w + char_info.xpad) * xsc2 + x_advance;
         }
@@ -656,17 +657,14 @@ class GlovFont {
     let glow = this.applied_style.glow_outer > 0 && (this.applied_style.glow_color & 0xff);
     if (outline) {
       if (glow) {
-        this.blend_mode = 'font_aa_outline_glow';
+        this.shader = font_shaders.font_aa_outline_glow;
       } else {
-        this.blend_mode = 'font_aa_outline';
+        this.shader = font_shaders.font_aa_outline;
       }
     } else if (glow) {
-      this.blend_mode = 'font_aa_glow';
+      this.shader = font_shaders.font_aa_glow;
     } else {
-      this.blend_mode = 'font_aa';
-    }
-    if (this.font_info.noFilter) {
-      this.blend_mode += '_nearest';
+      this.shader = font_shaders.font_aa;
     }
   }
 
@@ -704,33 +702,21 @@ class GlovFont {
   }
 }
 
-const shaders = {
-  font_aa: {
-    fp: fs.readFileSync(`${__dirname}/shaders/font_aa.fp`, 'utf8'),
-  },
-  font_aa_glow: {
-    fp: fs.readFileSync(`${__dirname}/shaders/font_aa_glow.fp`, 'utf8'),
-  },
-  font_aa_outline: {
-    fp: fs.readFileSync(`${__dirname}/shaders/font_aa_outline.fp`, 'utf8'),
-  },
-  font_aa_outline_glow: {
-    fp: fs.readFileSync(`${__dirname}/shaders/font_aa_outline_glow.fp`, 'utf8'),
-  },
-};
-
-export function populateDraw2DParams(params) {
-  assert(!gd_params);
-  gd_params = params;
-
-  // Set up embedded default shaders
-  params.shaders = params.shaders || {};
-  for (let name in shaders) {
-    assert(!params.shaders[name]);
-    params.shaders[name] = shaders[name];
+function fontShadersInit() {
+  if (font_shaders.font_aa) {
+    return;
   }
+  font_shaders.font_aa = shaders.create(gl.FRAGMENT_SHADER,
+    fs.readFileSync(`${__dirname}/shaders/font_aa.fp`, 'utf8'));
+  font_shaders.font_aa_glow = shaders.create(gl.FRAGMENT_SHADER,
+    fs.readFileSync(`${__dirname}/shaders/font_aa_glow.fp`, 'utf8'));
+  font_shaders.font_aa_outline = shaders.create(gl.FRAGMENT_SHADER,
+    fs.readFileSync(`${__dirname}/shaders/font_aa_outline.fp`, 'utf8'));
+  font_shaders.font_aa_outline_glow = shaders.create(gl.FRAGMENT_SHADER,
+    fs.readFileSync(`${__dirname}/shaders/font_aa_outline_glow.fp`, 'utf8'));
 }
 
 export function create(...args) {
+  fontShadersInit();
   return new GlovFont(...args);
 }

@@ -1,8 +1,9 @@
 /* eslint no-bitwise:off */
 /*global Z:false */
-/*global VMath:false */
 
-const glov_engine = require('./engine.js');
+const glov_input = require('./input.js');
+const glov_ui = require('./ui.js');
+const { v2clone, vec4, v4mulAdd } = require('./vmath.js');
 
 const JUMP_THRESHOLD = 0.5;
 const JUMP_TIME = 0.125;
@@ -65,7 +66,7 @@ function playSound() {
 
 class PlatCharacter {
   constructor(pos) {
-    this.pos = VMath.v2Copy(pos);
+    this.pos = v2clone(pos);
     this.v = [0,0];
     this.dead = false;
     this.on_ground = true;
@@ -124,17 +125,15 @@ class Platformer {
   }
 
   drawDebug(pos, scale) {
-    let glov_ui = glov_engine.glov_ui;
-    let glov_input = glov_engine.glov_input;
-    let p = VMath.v4BuildZero();
-    scale = VMath.v4Build(scale[0], scale[1], scale[0], scale[1]);
-    pos = VMath.v4Build(pos[0], pos[1], pos[0], pos[1]);
+    let p = vec4();
+    scale = vec4(scale[0], scale[1], scale[0], scale[1]);
+    pos = vec4(pos[0], pos[1], pos[0], pos[1]);
     [this.solids, this.platforms].forEach(function (arr, idx) {
       for (let ii = 0; ii < arr.length; ++ii) {
         let s = arr[ii];
-        VMath.v4MulAdd(s, scale, pos, p);
+        v4mulAdd(p, s, scale, pos);
         glov_ui.drawRect(p[0], p[1], p[2], p[3], Z.DEBUG, idx ? [0,1,1,0.5] : [1,0,1,0.5]);
-        if (glov_input.isMouseOver({
+        if (glov_input.mouseOver({
           x: p[0], y: p[1], w: p[2] - p[0], h: p[3] - p[1],
         })) {
           glov_ui.font.drawSizedAligned(null, p[0], p[1], Z.UI,
