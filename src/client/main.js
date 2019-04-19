@@ -43,9 +43,8 @@ let ansi_files = [
 
 const color_white = vec4(1, 1, 1, 1);
 
-export function main(canvas) {
-  glov_engine.startup({
-    canvas,
+export function main() {
+  if (!glov_engine.startup({
     game_width,
     game_height,
     pixely: 'strict',
@@ -56,7 +55,9 @@ export function main(canvas) {
     },
     pixel_aspect: (640/480) / (720 / 400),
     show_fps: false,
-  });
+  })) {
+    return;
+  }
 
   const terminal = glov_terminal.create();
   // const font = glov_engine.font;
@@ -86,14 +87,6 @@ export function main(canvas) {
   let terminal_countdown = 0;
 
   function test(dt) {
-    if (!test.color_sprite) {
-      test.color_sprite = v4clone(color_white);
-      test.character = {
-        x: (random() * (game_width - sprite_size) + (sprite_size * 0.5)),
-        y: (random() * (game_height - sprite_size) + (sprite_size * 0.5)),
-      };
-    }
-
     if (glov_input.keyDownEdge(KEYS.LEFT)) {
       auto_advance = false;
       terminal_countdown = 0;

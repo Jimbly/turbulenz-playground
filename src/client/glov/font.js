@@ -522,7 +522,7 @@ class GlovFont {
     let x = _x;
     let font_info = this.font_info;
     // Debug: show expect area of glyphs
-    // require('./engine.js').glov_ui.drawRect(_x, y,
+    // require('./ui.js').drawRect(_x, y,
     //   _x + xsc * font_info.font_size * 20, y + ysc * font_info.font_size,
     //   1000, [1, 0, 1, 0.5]);
     y += (font_info.y_offset || 0) * ysc;
@@ -565,7 +565,7 @@ class GlovFont {
     if (value[2] > 0) {
       value[2] = 0;
     }
-    let padding1 = max(1, applied_style.outline_width*font_texel_scale*avg_scale_combined);
+    let padding1 = max(0, applied_style.outline_width*font_texel_scale*avg_scale_font);
     let padding4 = vec4();
     const outer_scaled = applied_style.glow_outer*font_texel_scale;
     padding4[0] = max(outer_scaled*xsc - applied_style.glow_xoffs*font_texel_scale*xsc, padding1);
@@ -618,32 +618,40 @@ class GlovFont {
         if (char_info) {
           let char_scale = char_info.scale;
           let xsc2 = xsc * char_scale;
-          let ysc2 = ysc * char_scale;
-          let pad_scale = 1 / char_scale;
-          let tile_width = tex.width;
-          let tile_height = tex.height;
-          // Lazy update params here
-          if (char_scale !== tile_state) {
-            value2[0] = -applied_style.glow_xoffs * font_texel_scale * pad_scale / tile_width;
-            value2[1] = -applied_style.glow_yoffs * font_texel_scale * pad_scale / tile_height;
-            techParamsSet('glowParams', value2);
+          if (char_info.w) {
+            let ysc2 = ysc * char_scale;
+            let pad_scale = 1 / char_scale;
+            let tile_width = tex.width;
+            let tile_height = tex.height;
+            // Lazy update params here
+            if (char_scale !== tile_state) {
+              value2[0] = -applied_style.glow_xoffs * font_texel_scale * pad_scale / tile_width;
+              value2[1] = -applied_style.glow_yoffs * font_texel_scale * pad_scale / tile_height;
+              techParamsSet('glowParams', value2);
+            }
+
+            let u0 = (char_info.x0 - padding_in_font_space[0] * pad_scale) / tile_width;
+            let u1 = (char_info.x0 + char_info.w + padding_in_font_space[2] * pad_scale) / tile_width;
+            let v0 = (char_info.y0 - padding_in_font_space[1] * pad_scale) / tile_height;
+            let v1 = (char_info.y0 + char_info.h + padding_in_font_space[3] * pad_scale) / tile_height;
+
+            let w = char_info.w * xsc2 + (padding4[0] + padding4[2]) * rel_x_scale;
+            let h = char_info.h * ysc2 + (padding4[1] + padding4[3]) * rel_y_scale;
+
+            sprites.queueraw(
+              texs,
+              x - rel_x_scale * padding4[0], y - rel_y_scale * padding4[2] + char_info.yoffs * ysc2,
+              z + z_advance * i, w, h,
+              u0, v0, u1, v1,
+              buildVec4ColorFromIntColor(applied_style.color),
+              this.shader, techParamsGet());
+
+            // require('./ui.js').drawRect(x - rel_x_scale * padding4[0],
+            //   y - rel_y_scale * padding4[2] + char_info.yoffs * ysc2,
+            //   w + x - rel_x_scale * padding4[0],
+            //   h + y - rel_y_scale * padding4[2] + char_info.yoffs * ysc2,
+            //   1000, [i & 1, (i & 2)>>1, (i & 4)>>2, 0.5]);
           }
-
-          let u0 = (char_info.x0 - padding_in_font_space[0] * pad_scale) / tile_width;
-          let u1 = (char_info.x0 + char_info.w + padding_in_font_space[2] * pad_scale) / tile_width;
-          let v0 = (char_info.y0 - padding_in_font_space[1] * pad_scale) / tile_height;
-          let v1 = (char_info.y0 + char_info.h + padding_in_font_space[3] * pad_scale) / tile_height;
-
-          let w = char_info.w * xsc2 + (padding4[0] + padding4[2]) * rel_x_scale;
-          let h = char_info.h * ysc2 + (padding4[1] + padding4[3]) * rel_y_scale;
-
-          sprites.queueraw(
-            texs,
-            x - rel_x_scale * padding4[0], y - rel_y_scale * padding4[2] + char_info.yoffs * ysc2,
-            z + z_advance * i, w, h,
-            u0, v0, u1, v1,
-            buildVec4ColorFromIntColor(applied_style.color),
-            this.shader, techParamsGet());
 
           x += (char_info.w + char_info.xpad) * xsc2 + x_advance;
         }

@@ -1,6 +1,11 @@
 Javascript libGlov/GLOV.js framework
 ============================
 
+**Demos**
+* General feature test: [glovjs-playground](http://jimbly.github.io/glovjs/playground/)
+* Terminal module test: [glovjs-terminal](http://jimbly.github.io/glovjs/terminal/)
+
+**Notes**
 * Files can be ES2018 (through Babel)
 * Server automatically restarts on any relevant file change
 * Client automatically reloads on javascript or html change

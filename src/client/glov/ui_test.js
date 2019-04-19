@@ -19,6 +19,7 @@ let edit_box1;
 let edit_box2;
 let test_select1;
 let test_select2;
+let slider_value = 1;
 function init(x, y, column_width) {
   edit_box1 = glov_ui.createEditBox({
     x: x + column_width,
@@ -140,6 +141,14 @@ export function run(x, y, z) {
 
   y += test_select1.run({ x, y, z });
   y += test_select2.run({ x, y, z });
+
+  slider_value = glov_ui.slider(slider_value, {
+    x, y, z,
+    min: 0,
+    max: 2,
+  });
+  glov_ui.print(null, x + glov_ui.button_width + pad, y, z, `${slider_value.toFixed(2)}`);
+  y += glov_ui.button_height;
 }
 
 export function runFontTest(x, y) {

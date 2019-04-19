@@ -213,6 +213,7 @@ function onMouseMove(event, no_stop) {
 function onMouseDown(event) {
   onMouseMove(event); // update mouse_pos
   glov_engine.sound_manager.resume();
+  let no_click = event.target.tagName === 'INPUT';
 
   let button = event.button;
   mouse_down[button] = mouse_pos.slice(0);
@@ -222,6 +223,9 @@ function onMouseDown(event) {
     touches[touch_id].release = false;
   } else {
     touches[touch_id] = new TouchData(mouse_pos, false, button);
+    if (no_click) {
+      touches[touch_id].state = DOWN; // no edge
+    }
   }
 }
 
@@ -477,44 +481,42 @@ function endFrameTickMap(map) {
     }
   });
 }
-export function endFrame() {
+export function endFrame(skip_mouse) {
   endFrameTickMap(key_state);
   pad_states.forEach(endFrameTickMap);
-  for (let touch_id in touches) {
-    let touch_data = touches[touch_id];
-    if (touch_data.release) {
-      delete touches[touch_id];
-    } else {
-      touch_data.delta[0] = touch_data.delta[1] = 0;
-      touch_data.dispatched = false;
-      if (touch_data.state === DOWN_EDGE) {
-        touch_data.state = DOWN;
+  if (!skip_mouse) {
+    for (let touch_id in touches) {
+      let touch_data = touches[touch_id];
+      if (touch_data.release) {
+        delete touches[touch_id];
       } else {
-        assert(touch_data.state !== UP_EDGE); // should also have set .release!
+        touch_data.delta[0] = touch_data.delta[1] = 0;
+        touch_data.dispatched = false;
+        if (touch_data.state === DOWN_EDGE) {
+          touch_data.state = DOWN;
+        } else {
+          assert(touch_data.state !== UP_EDGE); // should also have set .release!
+        }
       }
     }
+    mouse_wheel = 0;
+    input_eaten_mouse = false;
   }
-  mouse_wheel = 0;
   input_eaten_kb = false;
-  input_eaten_mouse = false;
 }
 
-export function eatAllInput() {
+export function eatAllInput(skip_mouse) {
   // destroy touches, remove all down and up edges
-  endFrame();
-  mouse_over_captured = true;
+  endFrame(skip_mouse);
+  if (!skip_mouse) {
+    mouse_over_captured = true;
+    input_eaten_mouse = true;
+  }
   input_eaten_kb = true;
-  input_eaten_mouse = true;
 }
 
 export function eatAllKeyboardInput() {
-  let touches_save = touches;
-  let over_save = mouse_over_captured;
-  let eaten_mouse_save = input_eaten_mouse;
-  eatAllInput();
-  touches = touches_save;
-  mouse_over_captured = over_save;
-  input_eaten_mouse = eaten_mouse_save;
+  eatAllInput(true);
 }
 
 // returns position mapped to current camera view

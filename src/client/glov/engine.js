@@ -255,6 +255,7 @@ function tick() {
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
   gl.enable(gl.BLEND);
   gl.enable(gl.DEPTH_TEST);
+  gl.depthMask(true);
   textures.bind(0, textures.textures.error);
 
   camera2d.tick();
@@ -344,7 +345,42 @@ export function startup(params) {
   window.TurbulenzEngine = null;
   window.assert = assert;
 
-  canvas = params.canvas;
+  canvas = document.getElementById('canvas');
+
+  function resizeCanvas() {
+    let css_to_real = window.devicePixelRatio || 1;
+    window.pixel_scale = css_to_real;
+    canvas.width = Math.round(canvas.clientWidth * css_to_real);
+    canvas.height = Math.round(canvas.clientHeight * css_to_real);
+
+    // For the next 10 frames, make sure font size is correct
+    need_repos = 10;
+  }
+  // resize the canvas to fill browser window dynamically
+  window.addEventListener('resize', resizeCanvas, false);
+  resizeCanvas();
+
+  let is_pixely = params.pixely && params.pixely !== 'off';
+  let antialias = params.antialias || !is_pixely && params.antialias !== false;
+  let context_names = ['webgl', 'experimental-webgl'];
+  let context_opt = { antialias };
+  let good = false;
+  for (let i = 0; i < context_names.length; i += 1) {
+    try {
+      window.gl = canvas.getContext(context_names[i], context_opt);
+      good = true;
+      break;
+    } catch (e) {
+      // ignore
+    }
+  }
+  if (!good) {
+    // eslint-disable-next-line no-alert
+    window.alert('Sorry, but your browser does not support WebGL or does not have it enabled.');
+    document.getElementById('loading').style.visibility = 'hidden';
+    return false;
+  }
+
   assert(gl);
   canvas.focus();
   game_width = params.game_width || 1280;
@@ -398,7 +434,7 @@ export function startup(params) {
   /* eslint-disable global-require */
   glov_particles = require('./particles.js').create();
 
-  if (params.pixely && params.pixely !== 'off') {
+  if (is_pixely) {
     textures.defaultFilters(gl.NEAREST, gl.NEAREST);
   } else {
     textures.defaultFilters(gl.LINEAR, gl.LINEAR);
@@ -412,7 +448,7 @@ export function startup(params) {
     font = glov_font.create(params.font.info, params.font.texture);
   } else if (params.pixely === 'strict') {
     font = glov_font.create(font_info_04b03x1, 'font/04b03_8x1');
-  } else if (params.pixely) {
+  } else if (is_pixely) {
     font = glov_font.create(font_info_04b03x2, 'font/04b03_8x2');
   } else {
     font = glov_font.create(font_info_palanquin32, 'font/palanquin32');
@@ -425,16 +461,6 @@ export function startup(params) {
 
   camera2d.setAspectFixed(game_width, game_height);
 
-  function onResize() {
-    // This used to be here, but it breaks mobile devices / edit boxes
-    //canvas.focus();
-
-    // For the next 10 frames, make sure font size is correct
-    need_repos = 10;
-  }
-  window.addEventListener('resize', onResize, false);
-  onResize();
-
   if (params.state) {
     setState(params.state);
   }
@@ -446,6 +472,7 @@ export function startup(params) {
   }
 
   requestAnimationFrame(tick);
+  return true;
 }
 
 function loading() {
