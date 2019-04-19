@@ -11,7 +11,7 @@ const fs = require('fs');
 
 const { floor, random, min } = Math;
 
-const { vec2, vec4, v4clone } = require('./glov/vmath.js');
+const { vec2 } = require('./glov/vmath.js');
 
 glov_local_storage.storage_prefix = 'glovjs-playground';
 window.Z = window.Z || {};
@@ -39,9 +39,6 @@ let ansi_files = [
   fs.readFileSync(`${__dirname}/ans/data8.ans`, 'binary'),
   fs.readFileSync(`${__dirname}/ans/animated.ans`, 'binary'),
 ];
-
-
-const color_white = vec4(1, 1, 1, 1);
 
 export function main() {
   if (!glov_engine.startup({
@@ -71,7 +68,6 @@ export function main() {
   // Cache KEYS
   const KEYS = glov_input.KEYS;
 
-  const sprite_size = 64;
   function initGraphics() {
 
     sprites.white = createSprite({ url: 'white' });
