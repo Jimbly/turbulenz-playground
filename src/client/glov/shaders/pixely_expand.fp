@@ -74,7 +74,7 @@ void main()
 #ifdef DO_WARP
   // vignette
   float dist = min(1.0, 100.0 * min(0.5 - abs(texcoords.x - 0.5), 0.5 - abs(texcoords.y - 0.5)));
-  color *= dist;
+  color *= 0.5 + 0.5 * dist;
 #endif
 
   gl_FragColor = vec4(color, 1.0);

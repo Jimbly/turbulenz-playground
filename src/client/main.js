@@ -1,6 +1,7 @@
 /*eslint global-require:off*/
 /*global Z: false */
 
+const glov_camera = require('./glov/camera2d.js');
 const glov_engine = require('./glov/engine.js');
 const glov_input = require('./glov/input.js');
 const glov_local_storage = require('./glov/local_storage.js');
@@ -81,8 +82,12 @@ export function main() {
   let auto_advance = true;
   let term_idx = 0;
   let terminal_countdown = 0;
+  let menuInit;
 
-  function test(dt) {
+  function ansiArt(dt) {
+    if (glov_input.keyDownEdge(KEYS.ESCAPE)) {
+      glov_engine.setState(menuInit);
+    }
     if (glov_input.keyDownEdge(KEYS.LEFT)) {
       auto_advance = false;
       terminal_countdown = 0;
@@ -93,7 +98,7 @@ export function main() {
       terminal_countdown = 0;
       term_idx++;
     }
-    terminal.baud = glov_input.keyDown(KEYS.SPACE) ? Infinity : 9600;
+    terminal.baud = (glov_input.keyDown(KEYS.SPACE) || glov_input.keyDownEdge(KEYS.ESCAPE)) ? Infinity : 9600;
     if (!terminal_countdown || dt >= terminal_countdown) {
       if (term_idx === undefined) {
         term_idx = 0;
@@ -103,8 +108,8 @@ export function main() {
       }
       if (term_idx > ansi_files.length || term_idx <= 0) {
         // random fill
-        if (!test.terminal_inited) {
-          test.terminal_inited = true;
+        if (!ansiArt.terminal_inited) {
+          ansiArt.terminal_inited = true;
           // randomish fill
           terminal.autoScroll(false);
           terminal.moveto(0,0);
@@ -157,11 +162,48 @@ export function main() {
     });
   }
 
-  function testInit(dt) {
-    glov_engine.setState(test);
-    test(dt);
+  const MENU_W = 20;
+  const MENU_X = (80 - MENU_W) / 2;
+  const MENU_Y = 5;
+  function menu(dt) {
+    glov_camera.set(0, 0, 80, 25);
+
+    let sel = terminal.menu({
+      x: MENU_X,
+      y: 5,
+      items: [
+        'ANSI Art ',
+        'something ',
+        'something else ',
+      ],
+    });
+
+    switch (sel) { // eslint-disable-line default-case
+      case 0:
+        glov_engine.setState(ansiArt);
+        break;
+    }
+
+
+    glov_camera.set(0, 0, glov_engine.game_width, glov_engine.game_height);
+    terminal.render(dt, {
+      z: Z.BACKGROUND + 1,
+    });
   }
 
+  menuInit = function (dt) {
+    terminal.baud = 9600;
+    terminal.clear();
+
+    terminal.cells({
+      x: MENU_X - 2, y: MENU_Y - 1, ws: [MENU_W], hs: [3], charset: 2,
+      header: ' MENU ',
+    });
+
+    glov_engine.setState(menu);
+    menu(dt);
+  };
+
   initGraphics();
-  glov_engine.setState(testInit);
+  glov_engine.setState(menuInit);
 }
