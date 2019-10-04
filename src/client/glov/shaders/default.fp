@@ -16,6 +16,9 @@ varying vec3 interp_normal_vs;
 
 void main(void) {
   vec4 texture0 = texture2D(tex0, interp_texcoord.xy);
+#ifndef NOGAMMA
+  texture0.rgb = texture0.rgb * texture0.rgb; // pow(2)
+#endif
   vec4 albedo = texture0 * interp_color;
   if (albedo.a < 0.01) // TODO: Probably don't want this, but makes hacking transparent things together easier for now
     discard;
@@ -25,4 +28,8 @@ void main(void) {
 
   vec3 light_color = diffuse * light_diffuse.rgb + ambient.rgb;
   gl_FragColor = vec4(light_color * albedo.rgb, albedo.a);
+
+#ifndef NOGAMMA
+  gl_FragColor.rgb = pow(gl_FragColor.rgb, vec3(1.0/2.0));
+#endif
 }

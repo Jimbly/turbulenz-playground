@@ -9,7 +9,7 @@ const geom = require('./geom.js');
 const shaders = require('./shaders.js');
 const textures = require('./textures.js');
 
-const { vec2, vec4, v4set } = require('./vmath.js');
+const { vec2, vec3, vec4, v4set } = require('./vmath.js');
 
 const shader_data = {
   vp_copy: {
@@ -37,6 +37,10 @@ const shader_data = {
   //   fp: fs.readFileSync(`${__dirname}/shaders/effects_distort.fp`, 'utf8'),
   // },
 };
+
+export function registerShader(key, obj) {
+  shader_data[key] = obj;
+}
 
 function getShader(key) {
   let elem = shader_data[key];
@@ -111,7 +115,7 @@ function startup() {
   shader_params_gaussian_blur = {
     clip_space,
     copy_uv_scale,
-    sampleRadius: vec2(1, 1),
+    sampleRadius: vec3(1, 1, 1),
     Gauss: new Float32Array([0.93, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1]),
   };
 
@@ -305,12 +309,14 @@ function applyEffect(effect, view_w, view_h) {
 //   let sampleRadius = (params.blurRadius || 20);
 //   techparams.sampleRadius[0] = sampleRadius / source.width;
 //   techparams.sampleRadius[1] = 0;
+//   techparams.sampleRadius[2] = 1;
 //   techparams.inputTexture0 = blur1.colorTexture0;
 //   effectParams.destination = blur2;
 //   this.applyEffect(effectParams);
 //
 //   techparams.sampleRadius[0] = 0;
 //   techparams.sampleRadius[1] = sampleRadius / source.height;
+//   techparams.sampleRadius[2] = 1;
 //   techparams.inputTexture0 = blur2.colorTexture0;
 //   effectParams.destination = blur1;
 //   this.applyEffect(effectParams);
@@ -337,7 +343,7 @@ export function applyCopy(params) {
     startup();
   }
   applyEffect({
-    shader: 'copy',
+    shader: params.shader || 'copy',
     params: shader_params_default,
     texs: [params.source],
   });
@@ -361,6 +367,7 @@ export function applyPixelyExpand(params) {
   let sampleRadius = (params.hblur || 0.25) / resx;
   shader_params_gaussian_blur.sampleRadius[0] = sampleRadius;
   shader_params_gaussian_blur.sampleRadius[1] = 0;
+  shader_params_gaussian_blur.sampleRadius[2] = 1;
   applyEffect({
     shader: 'gaussian_blur',
     params: shader_params_gaussian_blur,
@@ -372,6 +379,7 @@ export function applyPixelyExpand(params) {
   sampleRadius = (params.vblur || 0.75) / resy;
   shader_params_gaussian_blur.sampleRadius[0] = 0;
   shader_params_gaussian_blur.sampleRadius[1] = sampleRadius;
+  shader_params_gaussian_blur.sampleRadius[2] = 1;
   applyEffect({
     shader: 'gaussian_blur',
     params: shader_params_gaussian_blur,
@@ -421,7 +429,7 @@ export function applyGaussianBlur(params) {
 
   while (res > min_size) {
     applyEffect({
-      shader: 'copy',
+      shader: params.shader_copy || 'copy',
       params: shader_params_default,
       texs: [inputTexture0],
     }, res, res);
@@ -433,6 +441,7 @@ export function applyGaussianBlur(params) {
   let sampleRadius = (params.blur || 1) / res;
   shader_params_gaussian_blur.sampleRadius[0] = sampleRadius;
   shader_params_gaussian_blur.sampleRadius[1] = 0;
+  shader_params_gaussian_blur.sampleRadius[2] = params.glow || 1;
   applyEffect({
     shader: 'gaussian_blur',
     params: shader_params_gaussian_blur,
@@ -442,6 +451,7 @@ export function applyGaussianBlur(params) {
 
   shader_params_gaussian_blur.sampleRadius[0] = 0;
   shader_params_gaussian_blur.sampleRadius[1] = sampleRadius;
+  shader_params_gaussian_blur.sampleRadius[2] = params.glow || 1;
   applyEffect({
     shader: 'gaussian_blur',
     params: shader_params_gaussian_blur,

@@ -1,9 +1,11 @@
 data_store/
 artifacts/
 node_modules/
+logs/
 ynpm-debug.log
 npm-debug.log
-build/
+build.dev/
+build.prod/
 *.sublime-workspace
 Bfxr
 *.00?

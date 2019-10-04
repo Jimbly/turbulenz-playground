@@ -6,14 +6,16 @@ defs.explosion = {
       blend: 'alpha',
       texture: 'particles/circle64',
       color: [1,1,1,1], // multiplied by animation track, default 1,1,1,1, can be omitted
-      color_track: [ // just values, NOT random range
+      color_track: [
+        // just values, NOT random range
         { t: 0.0, v: [1,1,1,0] },
         { t: 0.2, v: [1,1,1,1] },
         { t: 0.4, v: [1,1,0.5,0.5] },
         { t: 1.0, v: [1,0,0,0] },
       ],
       size: [[48,8], [48,8]], // multiplied by animation track
-      size_track: [ // just values, NOT random range
+      size_track: [
+        // just values, NOT random range
         { t: 0.0, v: [1,1] },
         { t: 0.2, v: [2,2] },
         { t: 0.4, v: [1,1] },

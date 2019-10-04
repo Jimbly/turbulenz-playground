@@ -1,5 +1,4 @@
 /*eslint global-require:off*/
-/*global Z: false */
 
 const glov_camera = require('./glov/camera2d.js');
 const glov_engine = require('./glov/engine.js');
@@ -53,6 +52,7 @@ export function main() {
     },
     pixel_aspect: (640/480) / (720 / 400),
     show_fps: false,
+    sound_manager: require('./glov/sound_manager.js').create(),
   })) {
     return;
   }

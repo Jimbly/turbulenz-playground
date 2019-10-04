@@ -1,9 +1,14 @@
-/*global Z: false */
+// Portions Copyright 2019 Jimb Esser (https://github.com/Jimbly/)
+// Released under MIT License: https://opensource.org/licenses/MIT
 /*eslint no-bitwise:off */
+
 const glov_engine = require('./engine.js');
 const glov_font = require('./font.js');
 const glov_ui = require('./ui.js');
 const glov_input = require('./input.js');
+
+window.Z = window.Z || {};
+Z.BACKGROUND = Z.BACKGROUND || 0;
 
 const { KEYS } = glov_input;
 const { abs, floor, max, min } = Math;
@@ -507,10 +512,14 @@ class GlovTerminal {
 
     // draw top
     let terminal = this;
-    function drawHorizLine(base, text) {
+    function drawHorizLine(base, text_list) {
       let line = [charset[base]];
+      if (!Array.isArray(text_list)) {
+        text_list = [text_list];
+      }
       for (let jj = 0; jj < ws.length; ++jj) {
         let w = ws[jj];
+        let text = text_list[jj];
         if (text) {
           let extra = w - text.length;
           let left = floor(extra / 2);
@@ -518,7 +527,13 @@ class GlovTerminal {
           for (let kk = 0; kk < left; ++kk) {
             line.push(charset[1]);
           }
+          if (params.header_format) {
+            line.push(params.header_format);
+          }
           line.push(text);
+          if (params.header_format) {
+            line.push('[0m');
+          }
           for (let kk = 0; kk < right; ++kk) {
             line.push(charset[1]);
           }
@@ -563,13 +578,16 @@ class GlovTerminal {
     let { x, y, items } = params;
     let color_sel = params.color_sel || { fg: 15, bg: 8 };
     let color_unsel = params.color_unsel || { fg: 7, bg: 0 };
+    let color_execute = params.color_execute || { fg: 8, bg: 0 };
     let pre_sel = params.pre_sel || '■ ';
     let pre_unsel = params.pre_unsel || '  ';
-    if (this.last_menu_frame !== this.frame - 1) {
+    let menu_key = `${x}_${y}_${items.join()}`;
+    if (this.last_menu_frame !== this.frame - 1 || this.last_menu_key !== menu_key) {
       // reset
-      this.menu_idx = 0;
+      this.menu_idx = params.def_idx || 0;
     }
     this.last_menu_frame = this.frame;
+    this.last_menu_key = menu_key;
 
     if (glov_input.keyDownEdge(KEYS.DOWN) || glov_input.keyDownEdge(KEYS.S)) {
       this.menu_idx++;
@@ -593,6 +611,12 @@ class GlovTerminal {
 
     let ret = -1;
 
+    if (glov_input.keyDownEdge(KEYS.SPACE) ||
+      glov_input.keyDownEdge(KEYS.ENTER)
+    ) {
+      ret = this.menu_idx;
+    }
+
     for (let ii = 0; ii < items.length; ++ii) {
       let param = {
         x,
@@ -603,20 +627,21 @@ class GlovTerminal {
       if (glov_input.click(param)) {
         this.menu_idx = ii;
         ret = ii;
-      } else if (glov_input.mouseOver(param)) {
+      } else if (glov_input.mouseMoved() && glov_input.mouseOver(param)) {
         this.menu_idx = ii;
       }
+      let hotkey = items[ii].match(/\[([A-Z0-9])\]/u);
+      if (hotkey && glov_input.keyDownEdge(KEYS.A + hotkey[1].charCodeAt(0) - 'A'.charCodeAt(0))) {
+        this.menu_idx = ii;
+        ret = ii;
+      }
       let selected = ii === this.menu_idx;
-      param.fg = selected ? color_sel.fg : color_unsel.fg;
-      param.bg = selected ? color_sel.bg : color_unsel.bg;
+      let executing = ii === ret;
+      let colors = executing ? color_execute : selected ? color_sel : color_unsel;
+      param.fg = colors.fg;
+      param.bg = colors.bg;
       param.text = `${selected ? pre_sel : pre_unsel}${items[ii]}`;
       this.print(param);
-    }
-
-    if (glov_input.keyDownEdge(KEYS.SPACE) ||
-      glov_input.keyDownEdge(KEYS.ENTER)
-    ) {
-      ret = this.menu_idx;
     }
 
     this.color(color_unsel.fg, color_unsel.bg);
@@ -624,7 +649,8 @@ class GlovTerminal {
     return ret;
   }
 
-  render(dt, params) {
+  render(params) {
+    let dt = glov_engine.getFrameDt();
     this.frame++;
 
     while (dt >= this.mod_countdown && this.mod_head) {

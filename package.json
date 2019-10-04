@@ -1,7 +1,7 @@
 {
-  "name": "glovjs-playground",
+  "name": "glov",
   "version": "0.0.2",
-  "description": "Template for a state of the art Javascript project using Turbulenz",
+  "description": "Template for a state of the art Javascript project using GLOV.js",
   "main": "build/server/index.js",
   "keywords": [
     "template",
@@ -12,12 +12,12 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git@github.com:Jimbly/glovjs-playground.git"
+    "url": "git@github.com:Jimbly/glovjs.git"
   },
   "scripts": {
     "start": "gulp browser-sync",
     "build": "gulp build",
-    "prod": "gulp build && node build/server/index.js",
+    "prod": "gulp build && node build.prod/server/index.js",
     "client_js": "gulp client_js",
     "lint": "gulp eslint"
   },
@@ -27,32 +27,44 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "express": "^4.16.4",
+    "dot-prop": "^4.2.0",
+    "express": "^4.17.1",
+    "express-static-gzip": "^2.0.5",
+    "fs-store": "^0.3.1",
     "gl-mat3": "^2.0.0",
     "gl-mat4": "^1.2.0",
-    "random-seed": "^0.3.0"
+    "minimist": "^1.2.0",
+    "mkdirp": "^0.5.1",
+    "nodemon": "^1.19.1",
+    "random-seed": "^0.3.0",
+    "request": "^2.88.0",
+    "ws": "^7.1.1"
   },
   "devDependencies": {
     "babel-core": "^6.26.3",
-    "babel-plugin-static-fs": "^1.1.0",
+    "babel-plugin-static-fs": "^3.0.0",
     "babel-preset-env": "^1.7.0",
-    "babelify": "^7.3.0",
-    "browser-sync": "^2.26.3",
-    "browserify": "^16.2.3",
+    "babelify": "^8.0.0",
+    "browser-sync": "^2.26.7",
+    "browserify": "^16.5.0",
     "fancy-log": "^1.3.2",
-    "gulp": "^3.9.1",
-    "gulp-babel": "^6.1.2",
-    "gulp-eslint": "^5.0.0",
-    "gulp-if": "^2.0.2",
-    "gulp-nodemon": "^2.4.1",
+    "gulp": "^4.0.2",
+    "gulp-babel": "^7.0.1",
+    "gulp-eslint": "^6.0.0",
+    "gulp-if": "^3.0.0",
+    "gulp-nodemon": "^2.4.2",
     "gulp-replace": "^1.0.0",
-    "gulp-sourcemaps": "^2.6.0",
-    "gulp-uglify": "^3.0.1",
+    "gulp-sourcemaps": "^2.6.5",
+    "gulp-uglify": "^3.0.2",
     "gulp-useref": "^3.1.6",
+    "gulp-web-compress": "^0.3.0",
     "lazypipe": "^1.0.1",
     "uglify-js": "3.4.7",
-    "vinyl-buffer": "^1.0.0",
-    "vinyl-source-stream": "^1.1.0",
+    "vinyl-buffer": "^1.0.1",
+    "vinyl-source-stream": "^2.0.0",
     "watchify": "3.11.0"
+  },
+  "optionalDependencies": {
+    "bufferutil": "^4.0.1"
   }
 }

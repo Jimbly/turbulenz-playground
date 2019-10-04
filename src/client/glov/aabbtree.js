@@ -1,9 +1,9 @@
-const assert = require('assert');
 // Copyright (c) 2009-2014 Turbulenz Limited
 // Used under MIT License
 // Modified by Jimb Esser
-
 /* eslint no-underscore-dangle:off, one-var:off, sort-vars:off, max-len:off, consistent-return:off, no-bitwise:off */
+
+const assert = require('assert');
 
 //
 // AABBTreeNode

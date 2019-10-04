@@ -9,13 +9,24 @@ html, body {
   overflow: hidden;
 }
 
-#content {
-  width: 100%;
-  height: 100%;
+a {
+  color: #DDF;
+}
+a:visited {
+  color: #DBF;
+}
+#nowebgl {
+  padding: 20px;
+  pointer-events: all;
 }
 
 #loading {
-  background-color: black;
+  background: black;
+}
+
+#content {
+  width: 100%;
+  height: 100%;
 }
 
 canvas {
@@ -26,11 +37,13 @@ canvas {
   height: 100vh;*/
 }
 
-#debug {
-  left: 0;
-  top: 0;
+#debug_overlay {
+  left: 1%;
+  top: 11%;
   position: fixed;
   white-space: pre-wrap;
+  z-index: 99;
+  background-color: rgba(1, 1, 1, 0.8);
 }
 
 .screenwrap {

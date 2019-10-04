@@ -1,9 +1,10 @@
+// Portions Copyright 2019 Jimb Esser (https://github.com/Jimbly/)
+// Released under MIT License: https://opensource.org/licenses/MIT
 /* eslint no-bitwise:off */
-/*global Z:false */
 
 const glov_input = require('./input.js');
 const glov_ui = require('./ui.js');
-const { v2clone, vec4, v4mulAdd } = require('./vmath.js');
+const { vec2, v2copy, vec4, v4mulAdd } = require('./vmath.js');
 
 const JUMP_THRESHOLD = 0.5;
 const JUMP_TIME = 0.125;
@@ -66,7 +67,7 @@ function playSound() {
 
 class PlatCharacter {
   constructor(pos) {
-    this.pos = v2clone(pos);
+    this.pos = v2copy(vec2(), pos);
     this.v = [0,0];
     this.dead = false;
     this.on_ground = true;

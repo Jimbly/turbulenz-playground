@@ -5,6 +5,8 @@
 const assert = require('assert');
 const { ceil, max } = Math;
 
+export const TRIANGLES = 4;
+export const TRIANGLE_FAN = 6;
 export const QUADS = 7;
 
 const gl_byte_size = {
@@ -123,10 +125,20 @@ function getQuadIndexBuf(quad_count) {
   return quad_index_buf;
 }
 
+export function createIndices(idxs) {
+  let ret = {
+    ibo: gl.createBuffer(),
+    ibo_size: idxs.length,
+  };
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ret.ibo);
+  bound_index_buf = ret.ibo;
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idxs, gl.STATIC_DRAW);
+  return ret;
+}
 
-// _format is [shader.semantic.foo, gl.FLOAT/UNSIGNED_BYTE/etc, count, normalized]
+// _format is [shaders.semantic.foo, gl.FLOAT/UNSIGNED_BYTE/etc, count, normalized]
 function Geom(_format, verts, idxs, mode) {
-  this.mode = mode || gl.TRIANGLES;
+  this.mode = mode || TRIANGLES;
   this.format = _format;
   this.stride = 0;
   this.elem_count = 0;
@@ -153,12 +165,18 @@ function Geom(_format, verts, idxs, mode) {
   }
   this.orig_mode = mode;
   if (idxs) {
-    this.ibo = gl.createBuffer();
-    this.ibo_owned = true;
-    this.ibo_size = idxs.length;
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.ibo);
-    bound_index_buf = this.ibo;
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idxs, gl.STATIC_DRAW);
+    if (idxs.ibo) {
+      this.ibo = idxs.ibo;
+      this.ibo_owned = false;
+      this.ibo_size = idxs.ibo_size;
+    } else {
+      this.ibo = gl.createBuffer();
+      this.ibo_owned = true;
+      this.ibo_size = idxs.length;
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.ibo);
+      bound_index_buf = this.ibo;
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idxs, gl.STATIC_DRAW);
+    }
   } else if (mode === QUADS) {
     assert(this.vert_count % 4 === 0);
     let quad_count = this.vert_count / 4;
@@ -166,7 +184,9 @@ function Geom(_format, verts, idxs, mode) {
     this.ibo = getQuadIndexBuf(quad_count);
     this.ibo_owned = false;
     this.ibo_size = quad_count * 6;
-    this.mode = gl.TRIANGLES;
+    this.mode = TRIANGLES;
+  } else if (mode === TRIANGLE_FAN) {
+    this.mode = TRIANGLE_FAN;
   } else {
     this.ibo = null;
     this.ibo_owned = false;
@@ -251,17 +271,20 @@ Geom.prototype.bind = function () {
     //   bindUnitBuf(1, this.vert_count);
     // }
     enableVertexAttribArray(this.used_attribs);
+  }
 
-    if (this.ibo && bound_index_buf !== this.ibo) {
-      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.ibo);
-      bound_index_buf = this.ibo;
-    }
+  if (this.ibo && bound_index_buf !== this.ibo) {
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.ibo);
+    bound_index_buf = this.ibo;
   }
 };
 Geom.prototype.draw = function () {
   this.bind();
-  assert(this.ibo); // else: gl.drawArrays(this.mode, ... this.ibo_size, gl.UNSIGNED_SHORT, 0);
-  gl.drawElements(this.mode, this.ibo_size, gl.UNSIGNED_SHORT, 0);
+  if (this.ibo) {
+    gl.drawElements(this.mode, this.ibo_size, gl.UNSIGNED_SHORT, 0);
+  } else {
+    gl.drawArrays(this.mode, 0, this.vert_count);
+  }
 };
 
 export function create(...args) {

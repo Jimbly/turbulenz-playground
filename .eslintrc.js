@@ -4,13 +4,21 @@ let relaxed = true; // Specific things I'm relaxing for convenience, probably no
 module.exports = {
   "env": {
     "es6": true,
-    "node": true
+    "node": true,
+    // "browser": true, // Don't set this, it masks undefined variables named "status", etc
   },
   "globals": {
     // Just the super-common ones, don't mask undefined variables named "status", etc
     "window": true,
     "document": true,
+    "Blob": true,
+    "Image": true,
+    "FileReader": true,
+    // Our engine globals
     "gl": true,
+    "Z": true,
+    // Our pre-processor defines
+    "BUILD_TIMESTAMP": true,
   },
   "extends": "eslint:recommended",
   "parserOptions": {
@@ -19,7 +27,7 @@ module.exports = {
   },
   "rules": {
     "accessor-pairs": "error",
-    "array-bracket-newline": "error",
+    "array-bracket-newline": ["error", "consistent"], // JE
     "array-bracket-spacing": ignore_style ? "off" : [
       "error",
       "never"

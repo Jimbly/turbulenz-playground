@@ -29,10 +29,7 @@ Notes:
 
 
 TODO:
-* migrate more things away from Turbulenz
-* input
-  * dragging?
-  * onMouseDown not firing, because isHovering is not set because of my handler changes?
+* migrate audio away from Turbulenz
 * use spine for sequencing, or leave this until later?
 * cleaner window resize handling (have to be checking this each frame anyway?)
 

@@ -1,6 +1,6 @@
-/* eslint-env jquery */
+// Portions Copyright 2019 Jimb Esser (https://github.com/Jimbly/)
+// Released under MIT License: https://opensource.org/licenses/MIT
 /* eslint no-underscore-dangle:off */
-/* global Z:false */
 
 window.Z = window.Z || {};
 Z.BORDERS = Z.BORDERS || 90;
@@ -26,9 +26,9 @@ const glov_input = require('./input.js');
 const { abs, max, min, round, sqrt } = Math;
 const glov_sprites = require('./sprites.js');
 const textures = require('./textures.js');
-const { clone, merge } = require('../../common/util.js');
+const { clamp, clone, lerp, merge } = require('../../common/util.js');
 const { mat43, m43identity, m43mul } = require('./mat43.js');
-const { clamp, lerp, vec2, vec4, v4scale } = require('./vmath.js');
+const { vec2, vec4, v4scale } = require('./vmath.js');
 
 const MODAL_DARKEN = 0.75;
 let KEYS;
@@ -54,7 +54,7 @@ export function makeColorSet(color) {
     disabled: vec4(),
   };
   v4scale(ret.regular, color, 1);
-  v4scale(ret.rollover, color, 0.8);
+  v4scale(ret.rollover, color, 0.8); // because we do not have specific graphics
   v4scale(ret.down, color, 0.7);
   v4scale(ret.disabled, color, 0.4);
   for (let field in ret) {
@@ -128,12 +128,14 @@ function doDesaturateEffect(factor, params) {
 export let button_height = 32;
 export let font_height = 24;
 export let button_width = 200;
+export let modal_button_width = 100;
 export let button_img_size = button_height;
 export let modal_width = 600;
 export let modal_y0 = 200;
 export let modal_title_scale = 1.2;
 export let pad = 16;
 export let panel_pixel_scale = 32 / 13; // button_height / button pixel resolution
+export let tooltip_panel_pixel_scale = panel_pixel_scale;
 export let tooltip_width = 400;
 export let tooltip_pad = 8;
 
@@ -180,42 +182,43 @@ let focused_key;
 let focused_key_prev1;
 let focused_key_prev2;
 
-export function startup(_font, ui_sprites) {
-  ui_sprites = ui_sprites || {};
+export function loadUISprite(name, ws, hs, overrides, only_override) {
+  let override = overrides && overrides[name];
+  if (override === null) {
+    // skip it, assume not used
+  } else if (override) {
+    sprites[name] = glov_sprites.create({
+      name: override[0],
+      ws: override[1],
+      hs: override[2],
+    });
+  } else if (!only_override) {
+    sprites[name] = glov_sprites.create({
+      name: `ui/${name}`,
+      ws,
+      hs,
+    });
+  }
+}
+
+export function startup(_font, overrides) {
   font = _font;
   KEYS = glov_input.KEYS;
   pad_codes = glov_input.pad_codes;
 
-  function loadUISprite(name, ws, hs, only_override) {
-    let override = ui_sprites[name];
-    if (override) {
-      sprites[name] = glov_sprites.create({
-        name: override[0],
-        ws: override[1],
-        hs: override[2],
-      });
-    } else if (!only_override) {
-      sprites[name] = glov_sprites.create({
-        name: `ui/${name}`,
-        ws,
-        hs,
-      });
-    }
-  }
-
-  loadUISprite('button', [4, 5, 4], [13]);
+  loadUISprite('button', [4, 5, 4], [13], overrides);
   sprites.button_regular = sprites.button;
-  loadUISprite('button_rollover', [4, 5, 4], [13], true);
-  loadUISprite('button_down', [4, 5, 4], [13]);
-  loadUISprite('button_disabled', [4, 5, 4], [13]);
-  loadUISprite('panel', [3, 2, 3], [3, 10, 3]);
-  loadUISprite('menu_entry', [4, 5, 4], [13]);
-  loadUISprite('menu_selected', [4, 5, 4], [13]);
-  loadUISprite('menu_down', [4, 5, 4], [13]);
-  loadUISprite('menu_header', [4, 5, 12], [13]);
-  loadUISprite('slider', [6, 2, 6], [13]);
-  // loadUISprite('slider_notch', [3], [13]);
-  loadUISprite('slider_handle', [9], [13]);
+  loadUISprite('button_rollover', [4, 5, 4], [13], overrides, true);
+  loadUISprite('button_down', [4, 5, 4], [13], overrides);
+  loadUISprite('button_disabled', [4, 5, 4], [13], overrides);
+  loadUISprite('panel', [3, 2, 3], [3, 10, 3], overrides);
+  loadUISprite('menu_entry', [4, 5, 4], [13], overrides);
+  loadUISprite('menu_selected', [4, 5, 4], [13], overrides);
+  loadUISprite('menu_down', [4, 5, 4], [13], overrides);
+  loadUISprite('menu_header', [4, 5, 12], [13], overrides);
+  loadUISprite('slider', [6, 2, 6], [13], overrides);
+  // loadUISprite('slider_notch', [3], [13], overrides);
+  loadUISprite('slider_handle', [9], [13], overrides);
 
   sprites.white = glov_sprites.create({ url: 'white' });
 
@@ -230,8 +233,8 @@ export function startup(_font, ui_sprites) {
 }
 
 let dynamic_text_elem;
-export function getElem() {
-  if (modal_dialog) {
+export function getElem(allow_modal) {
+  if (modal_dialog && !allow_modal) {
     return null;
   }
   if (dom_elems_issued >= dom_elems.length) {
@@ -272,6 +275,7 @@ export function drawHBox(coords, s, color) {
       w: my_w,
       h: coords.h,
       uvs: uidata.rects[ii],
+      // nozoom: true, // nozoom since different parts of the box get zoomed differently
     });
     x += my_w;
   }
@@ -298,6 +302,7 @@ export function drawBox(coords, s, pixel_scale, color) {
             w: my_w,
             h: my_h,
             uvs: uidata.rects[jj * 3 + ii],
+            nozoom: true, // nozoom since different parts of the box get zoomed differently
           });
           y += my_h;
         }
@@ -412,7 +417,7 @@ export function panel(param) {
   assert(typeof param.h === 'number');
   param.z = param.z || (Z.UI - 1);
   let color = param.color || color_panel;
-  drawBox(param, sprites.panel, panel_pixel_scale, color);
+  drawBox(param, sprites.panel, param.pixel_scale || panel_pixel_scale, color);
   glov_input.click(param);
   glov_input.mouseOver(param);
 }
@@ -435,6 +440,7 @@ export function drawTooltip(param) {
     x + eff_tooltip_pad, y, z+1, tooltip_w - eff_tooltip_pad * 2, 0, font_height,
     param.tooltip);
   y += eff_tooltip_pad;
+  let pixel_scale = param.pixel_scale || tooltip_panel_pixel_scale;
 
   panel({
     x,
@@ -442,6 +448,7 @@ export function drawTooltip(param) {
     z,
     w: tooltip_w,
     h: y - tooltip_y0,
+    pixel_scale,
   });
 }
 
@@ -449,12 +456,25 @@ export function drawTooltip(param) {
 export function buttonShared(param) {
   let state = 'regular';
   let ret = false;
+  if (param.draw_only) {
+    return { ret, state };
+  }
   let key = param.key || `${param.x}_${param.y}`;
   let focused = !param.disabled && !param.no_focus && focusCheck(key);
+  let key_opts = param.in_event_cb ? { in_event_cb: param.in_event_cb } : null;
   button_mouseover = false;
   if (param.disabled) {
     glov_input.mouseOver(param); // Still eat mouse events
     state = 'disabled';
+  } else if (param.drag_target && (ret = glov_input.dragDrop(param))) {
+    console.log('dragDrop');
+    if (!param.no_touch_mouseover || !glov_input.mousePosIsTouch()) {
+      setMouseOver(key);
+    }
+    if (!param.no_focus) {
+      focusSteal(key);
+      focused = true;
+    }
   } else if (glov_input.click(param)) {
     if (!param.no_touch_mouseover || !glov_input.mousePosIsTouch()) {
       setMouseOver(key);
@@ -469,6 +489,10 @@ export function buttonShared(param) {
       focusSteal(key);
       focused = true;
     }
+  } else if (param.drag_target && glov_input.dragOver(param)) {
+    // Set this even if param.no_touch_mouse_over is set
+    setMouseOver(key);
+    state = glov_input.mouseDown() ? 'down' : 'rollover';
   } else if (glov_input.mouseOver(param)) {
     if (param.no_touch_mouseover && glov_input.mousePosIsTouch()) {
       // do not set mouseover
@@ -481,7 +505,7 @@ export function buttonShared(param) {
   }
   button_focused = focused;
   if (focused) {
-    if (glov_input.keyDownEdge(KEYS.SPACE) || glov_input.keyDownEdge(KEYS.RETURN) ||
+    if (glov_input.keyDownEdge(KEYS.SPACE, key_opts) || glov_input.keyDownEdge(KEYS.RETURN, key_opts) ||
       glov_input.padButtonDownEdge(pad_codes.A)
     ) {
       ret = true;
@@ -499,26 +523,29 @@ export function buttonShared(param) {
       tooltip_width: param.tooltip_width,
     });
   }
+  param.z += param.z_bias && param.z_bias[state] || 0;
   return { ret, state, focused };
 }
 
+export let button_last_color;
 export function buttonTextDraw(param, state, focused) {
   let colors = param.colors || color_button;
-  let color = colors[state];
-  let sprite_name = `button_${state}`;
+  let color = button_last_color = colors[state];
+  let base_name = param.base_name || 'button';
+  let sprite_name = `${base_name}_${state}`;
   let sprite = sprites[sprite_name];
-  if (sprite) { // specific sprite, use regular colors
-    color = colors.regular;
-  } else {
-    sprite = sprites.button;
+  // Note: was if (sprite) color = colors.regular for specific-sprite matches
+  if (!sprite) {
+    sprite = sprites[base_name];
   }
 
   drawHBox(param, sprite, color);
+  let hpad = min(param.font_height * 0.25, param.w * 0.1);
   font.drawSizedAligned(
     focused ? font_style_focused : font_style_normal,
-    param.x, param.y, param.z + 0.1,
+    param.x + hpad, param.y, param.z + 0.1,
     // eslint-disable-next-line no-bitwise
-    param.font_height, glov_font.ALIGN.HCENTERFIT | glov_font.ALIGN.VCENTER, param.w, param.h, param.text);
+    param.font_height, glov_font.ALIGN.HCENTERFIT | glov_font.ALIGN.VCENTER, param.w - hpad * 2, param.h, param.text);
 }
 
 export function buttonText(param) {
@@ -552,9 +579,15 @@ export function buttonImage(param) {
 
   let { ret, state } = buttonShared(param);
   let colors = param.colors || color_button;
-  let color = colors[state];
+  let color = button_last_color = colors[state];
+  let base_name = param.base_name || 'button';
+  let sprite_name = `${base_name}_${state}`;
+  let sprite = sprites[sprite_name];
+  if (!sprite) {
+    sprite = sprites[base_name];
+  }
 
-  drawHBox(param, sprites.button, color);
+  drawHBox(param, sprite, color);
   let img_w = param.img.size[0];
   let img_h = param.img.size[1];
   let img_origin = param.img.origin;
@@ -565,7 +598,7 @@ export function buttonImage(param) {
     x: param.x + (param.w - img_w) / 2 + img_origin[0] * img_w,
     y: param.y + (param.h - img_h) / 2 + img_origin[1] * img_h,
     z: param.z + 0.1,
-    color,
+    color: param.color1 && param.color ? param.color : color, // use explicit tint if doing dual-tinting
     color1: param.color1,
     w: img_scale,
     h: img_scale,
@@ -594,8 +627,12 @@ export function modalDialog(params) {
   modal_dialog = params;
 }
 
+export function modalDialogClear() {
+  modal_dialog = null;
+}
+
 function modalDialogRun() {
-  const eff_button_width = modal_dialog.button_width || round(button_width / 2);
+  const eff_button_width = modal_dialog.button_width || modal_button_width;
   const game_width = camera2d.x1() - camera2d.x0();
   const text_w = modal_width - pad * 2;
   const x0 = camera2d.x0() + round((game_width - modal_width) / 2);
@@ -603,6 +640,10 @@ function modalDialogRun() {
   const y0 = modal_y0;
   let y = y0 + pad;
   let eff_font_height = modal_dialog.font_height || font_height;
+
+  if (glov_input.pointerLocked()) {
+    glov_input.pointerLockExit();
+  }
 
   if (modal_dialog.title) {
     y += font.drawSizedWrapped(modal_font_style,
@@ -615,6 +656,12 @@ function modalDialogRun() {
     y += font.drawSizedWrapped(modal_font_style, x, y, Z.MODAL, text_w, 0, eff_font_height,
       modal_dialog.text);
     y += pad;
+  }
+
+  if (modal_dialog.tick) {
+    let param = { x, y };
+    modal_dialog.tick(param);
+    y = param.y;
   }
 
   let buttons = modal_dialog.buttons;
@@ -754,8 +801,7 @@ export function slider(value, param) {
   return value;
 }
 
-let bad_frames = 0;
-export function tick(dt) {
+export function tickUI(dt) {
   last_frame_button_mouseover = frame_button_mouseover;
   frame_button_mouseover = false;
   focused_last_frame = focused_this_frame;
@@ -764,23 +810,11 @@ export function tick(dt) {
   modal_stealing_focus = false;
   touch_changed_focus = false;
 
-  for (let ii = 0; ii < last_frame_edit_boxes.length; ++ii) {
-    let edit_box = last_frame_edit_boxes[ii];
-    let idx = exports.this_frame_edit_boxes.indexOf(edit_box);
-    if (idx === -1) {
-      edit_box.unrun();
-    }
-  }
   last_frame_edit_boxes = exports.this_frame_edit_boxes;
   exports.this_frame_edit_boxes = [];
 
-  while (dom_elems_issued < dom_elems.length) {
-    let elem = dom_elems.pop();
-    dynamic_text_elem.removeChild(elem);
-  }
   dom_elems_issued = 0;
 
-  let pp_this_frame = false;
   if (modal_dialog || menu_up) {
     let params = menu_fade_params;
     if (!menu_up) {
@@ -789,13 +823,12 @@ export function tick(dt) {
     }
     menu_up_time += dt;
     // Effects during modal dialogs
-    if (glov_engine.postprocessing) {
-      let factor = min(menu_up_time / 500, 1);
+    let factor = min(menu_up_time / 500, 1);
+    if (!glov_engine.defines.NOPP) {
       glov_sprites.queuefn(params.z - 2, doBlurEffect.bind(null, factor, params));
       glov_sprites.queuefn(params.z - 1, doDesaturateEffect.bind(null, factor, params));
-      pp_this_frame = true;
     } else {
-      // Just darken
+      // Or, just darken
       sprites.white.draw({
         x: camera2d.x0(),
         y: camera2d.y0(),
@@ -810,15 +843,6 @@ export function tick(dt) {
   }
   menu_up = false;
 
-  if (!glov_engine.is_loading && glov_engine.this_frame_time > 250 && pp_this_frame) {
-    bad_frames++;
-    if (bad_frames >= 3) { // 3 in a row, disable superfluous postprocessing
-      glov_engine.postprocessingAllow(false);
-    }
-  } else if (bad_frames) {
-    bad_frames = 0;
-  }
-
   if (modal_dialog) {
     modalDialogRun();
   }
@@ -830,6 +854,19 @@ export function endFrame() {
     w: Infinity, h: Infinity,
   })) {
     focusSteal('canvas');
+  }
+
+  for (let ii = 0; ii < last_frame_edit_boxes.length; ++ii) {
+    let edit_box = last_frame_edit_boxes[ii];
+    let idx = exports.this_frame_edit_boxes.indexOf(edit_box);
+    if (idx === -1) {
+      edit_box.unrun();
+    }
+  }
+
+  while (dom_elems_issued < dom_elems.length) {
+    let elem = dom_elems.pop();
+    dynamic_text_elem.removeChild(elem);
   }
 }
 
@@ -1041,17 +1078,31 @@ export function scaleSizes(scale) {
   font_height = round(24 * scale);
   button_width = round(200 * scale);
   button_img_size = button_height;
+  modal_button_width = round(button_width / 2);
   modal_width = round(600 * scale);
   modal_y0 = round(200 * scale);
   modal_title_scale = 1.2;
   pad = round(16 * scale);
   tooltip_width = round(400 * scale);
   tooltip_pad = round(8 * scale);
-  panel_pixel_scale = button_height / 13; // button_height / button pixel resolution
+  panel_pixel_scale = button_height / 13; // button_height / panel pixel resolution
+  tooltip_panel_pixel_scale = panel_pixel_scale;
+}
+
+export function setModalSizes(_modal_button_width, width, y0, title_scale) {
+  modal_button_width = _modal_button_width || round(button_width / 2);
+  modal_width = width || 600;
+  modal_y0 = y0 || 200;
+  modal_title_scale = title_scale || 1.2;
 }
 
 export function setFontHeight(_font_height) {
   font_height = _font_height;
+}
+
+export function setTooltipWidth(_tooltip_width, _tooltip_panel_pixel_scale) {
+  tooltip_width = _tooltip_width;
+  tooltip_panel_pixel_scale = _tooltip_panel_pixel_scale;
 }
 
 scaleSizes(1);

@@ -1,8 +1,10 @@
+// Portions Copyright 2019 Jimb Esser (https://github.com/Jimbly/)
+// Released under MIT License: https://opensource.org/licenses/MIT
+/* eslint complexity:off */
+
 //////////////////////////////////////////////////////////////////////////
 // GlovSimpleMenu is just a GlovSelectionBox plus some logic to activate
 // callbacks/etc upon selecting of elements.
-
-/* eslint complexity:off */
 
 const assert = require('assert');
 const camera2d = require('./camera2d.js');

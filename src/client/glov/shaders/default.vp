@@ -11,15 +11,15 @@ attribute vec3 NORMAL;
 
 // per-drawcall input
 uniform mat3 mv_inv_trans;
-uniform mat4 mvp;
-uniform mat4 mat_vp;
-uniform mat4 mat_m;
+uniform mat4 projection;
+uniform mat4 mat_mv;
 uniform vec4 color;
 
 // output
 varying vec4 interp_color;
 varying vec2 interp_texcoord;
 varying vec3 interp_normal_vs;
+// varying vec3 interp_pos_vs;
 
 void main(void) {
   //interp_color = vec4(COLOR * color.rgb, color.a);
@@ -29,5 +29,8 @@ void main(void) {
   // gl_Position = vec4(POSITION, 1.0);
 
   // gl_Position = mat_vp * (mat_m * vec4(POSITION, 1.0));
-  gl_Position = mvp * vec4(POSITION, 1.0);
+  // gl_Position = mvp * vec4(POSITION, 1.0);
+  vec4 pos_vs = mat_mv * vec4(POSITION, 1.0);
+  // interp_pos_vs = pos_vs.xyz;
+  gl_Position = projection * pos_vs;
 }

@@ -1,6 +1,7 @@
 // Portions Copyright 2019 Jimb Esser (https://github.com/Jimbly/)
 // Released under MIT License: https://opensource.org/licenses/MIT
 /* eslint-env browser */
+
 const assert = require('assert');
 
 export let textures = {};
@@ -23,7 +24,7 @@ export function defaultFilters(min, mag) {
   default_filter_mag = mag;
 }
 
-const { isPowerOfTwo, nextHighestPowerOfTwo } = require('./vmath.js');
+const { isPowerOfTwo, nextHighestPowerOfTwo } = require('../../common/util.js');
 
 let bound_unit = null;
 let bound_tex = [];
@@ -84,6 +85,10 @@ function Texture(params) {
   this.handle = gl.createTexture();
   this.eff_handle = handle_loading;
   this.setSamplerState(params);
+  this.src_width = this.src_height = 1;
+  this.width = this.height = 1;
+  this.nozoom = params.nozoom || false;
+  this.on_load = [];
 
   this.format = params.format || format.RGBA8;
 
@@ -122,13 +127,16 @@ Texture.prototype.updateData = function updateData(w, h, data) {
   setUnit(0);
   bound_tex[0] = null; // Force a re-bind, no matter what
   bindHandle(0, this.target, this.handle);
+  this.src_width = w;
+  this.src_height = h;
   this.width = w;
   this.height = h;
   if (data instanceof Uint8Array) {
+    assert(data.length >= w * h * this.format.count);
     gl.texImage2D(this.target, 0, this.format.internal_type, w, h, 0,
       this.format.internal_type, this.format.gl_type, data);
   } else {
-    assert(data instanceof Image);
+    assert(data instanceof Image || data.width); // instanceof Image fails with ublock AdBlocker
     // Pad up to power of two
     if (!isPowerOfTwo(w) || !isPowerOfTwo(h)) {
       this.width = nextHighestPowerOfTwo(w);
@@ -152,6 +160,20 @@ Texture.prototype.updateData = function updateData(w, h, data) {
   }
   this.eff_handle = this.handle;
   this.loaded = true;
+
+  let arr = this.on_load;
+  this.on_load = [];
+  for (let ii = 0; ii < arr.length; ++ii) {
+    arr[ii](this);
+  }
+};
+
+Texture.prototype.onLoad = function (cb) {
+  if (this.loaded) {
+    cb(this); // eslint-disable-line callback-return
+  } else {
+    this.on_load.push(cb);
+  }
 };
 
 Texture.prototype.loadURL = function loadURL(url) {
@@ -303,6 +325,7 @@ export function startup() {
   handle_error = load({
     name: 'error',
     width: 2, height: 2,
+    nozoom: true,
     format: format.RGBA8,
     filter_mag: gl.NEAREST,
     data: new Uint8Array([
@@ -316,6 +339,7 @@ export function startup() {
   handle_loading = load({
     name: 'loading',
     width: 2, height: 2,
+    nozoom: true,
     format: format.RGBA8,
     data: new Uint8Array([
       127, 127, 127, 255,
@@ -328,6 +352,7 @@ export function startup() {
   load({
     name: 'white',
     width: 2, height: 2,
+    nozoom: true,
     format: format.RGBA8,
     data: new Uint8Array([
       255, 255, 255, 255,

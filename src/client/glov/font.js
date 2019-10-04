@@ -1,6 +1,6 @@
-/* eslint no-bitwise:off */
-/* eslint complexity:off */
-/* eslint no-shadow:off */
+// Portions Copyright 2019 Jimb Esser (https://github.com/Jimbly/)
+// Released under MIT License: https://opensource.org/licenses/MIT
+/* eslint no-bitwise:off, complexity:off, no-shadow:off */
 
 const assert = require('assert');
 const camera2d = require('./camera2d.js');
@@ -9,7 +9,8 @@ const { floor, max, round } = Math;
 const shaders = require('./shaders.js');
 const sprites = require('./sprites.js');
 const textures = require('./textures.js');
-const { clamp, vec4, v4clone, v4scale } = require('./vmath.js');
+const { clamp } = require('../../common/util.js');
+const { vec4, v4clone, v4scale } = require('./vmath.js');
 
 /*
 
@@ -492,10 +493,12 @@ class GlovFont {
       text = '(null)';
     }
     this.applyStyle(style);
+    this.last_width = 0;
     let num_lines = this.wrapLinesScaled(w, indent, xsc, text, (xoffs, linenum, word) => {
       let y2 = y + this.font_info.font_size * ysc * linenum;
       let x2 = x + xoffs;
-      this.drawScaled(style, x2, y2, z, xsc, ysc, word);
+      let word_w = this.drawScaled(style, x2, y2, z, xsc, ysc, word);
+      this.last_width = max(this.last_width, xoffs + word_w);
     });
     return num_lines * this.font_info.font_size * ysc;
   }
@@ -518,8 +521,10 @@ class GlovFont {
   // Main implementation
 
   drawScaled(style, _x, y, z, xsc, ysc, text) {
-
     let x = _x;
+    assert(isFinite(x));
+    assert(isFinite(y));
+    assert(isFinite(z));
     let font_info = this.font_info;
     // Debug: show expect area of glyphs
     // require('./ui.js').drawRect(_x, y,

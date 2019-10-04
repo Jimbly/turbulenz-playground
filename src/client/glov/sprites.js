@@ -3,7 +3,6 @@
 // Some code from Turbulenz: Copyright (c) 2012-2013 Turbulenz Limited
 // Released under MIT License: https://opensource.org/licenses/MIT
 
-
 const assert = require('assert');
 const camera2d = require('./camera2d.js');
 const engine = require('./engine.js');
@@ -12,8 +11,8 @@ const geom = require('./geom.js');
 const { cos, max, min, round, sin } = Math;
 const textures = require('./textures.js');
 const shaders = require('./shaders.js');
+const { nextHighestPowerOfTwo } = require('../../common/util.js');
 const { vec2, vec4 } = require('./vmath.js');
-const { nextHighestPowerOfTwo } = require('./vmath.js');
 
 export const BLEND_ALPHA = 0;
 export const BLEND_ADDITIVE = 1;
@@ -68,6 +67,7 @@ function cmpSprite(a, b) {
 }
 
 export function queuefn(z, fn) {
+  assert(isFinite(z));
   sprite_queue.push({
     fn,
     x: 0,
@@ -83,6 +83,7 @@ export function queueraw4(
   u0, v0, u1, v1,
   color, shader, shader_params, blend
 ) {
+  assert(isFinite(z));
   let elem = spriteDataAlloc();
   let data = elem.data;
   // x1 y1 x2 y2 x3 y3 x4 y4 - vertices [0,8)
@@ -140,7 +141,8 @@ export function queueraw(
     color, shader, shader_params, blend);
 }
 
-export function queuesprite(sprite, x, y, z, w, h, rot, uvs, color, shader, shader_params) {
+export function queuesprite(sprite, x, y, z, w, h, rot, uvs, color, shader, shader_params, nozoom) {
+  assert(isFinite(z));
   let elem = spriteDataAlloc();
   elem.texs = sprite.texs;
   elem.x = x = (x - camera2d.data[0]) * camera2d.data[4];
@@ -192,30 +194,46 @@ export function queuesprite(sprite, x, y, z, w, h, rot, uvs, color, shader, shad
   data[10] = color[2];
   data[11] = color[3];
 
-  let bias = 0;
+  let ubias = 0;
+  let vbias = 0;
   let tex = elem.texs[0];
-  if (true) {
+  if (!nozoom && !tex.nozoom) {
     // Bias the texture coordinates depending on the minification/magnification
     //   level so we do not get pixels from neighboring frames bleeding in
+    // Use min here (was max in libGlov), to solve tooltip edges being wrong in strict pixely
+    // Use max here to solve box buttons not lining up, but instead using nozoom in drawBox/drawHBox,
+    //   but, that only works for magnification - need the max here for minification!
     let zoom_level = max(
       (uvs[2] - uvs[0]) * tex.width / w,
       (uvs[3] - uvs[1]) * tex.height / h,
-    );
-    if (zoom_level < 1) {
+    ); // in texels per pixel
+    if (zoom_level < 1) { // magnification
       if (tex.filter_mag === gl.LINEAR) {
-        bias = 0.5;
+        // Need to bias by half a texel, so we're doing absolutely no blending with the neighboring texel
+        ubias = vbias = 0.5;
+      } else if (tex.filter_mag === gl.NEAREST && engine.antialias) {
+        // When antialiasing is on, even nearest sampling samples from adjacent texels, do slight bias
+        // Want to bias by one *pixel's* worth
+        ubias = vbias = zoom_level / 2;
       }
-    } else if (zoom_level > 1) {
+    } else if (zoom_level > 1) { // minification
       // need to apply this bias even with nearest filtering, not exactly sure why
       let mipped_texels = zoom_level / 2;
-      bias = 0.5 + mipped_texels;
+      ubias = vbias = 0.5 + mipped_texels;
+
+    }
+    if (uvs[0] > uvs[2]) {
+      ubias *= -1;
+    }
+    if (uvs[1] > uvs[3]) {
+      vbias *= -1;
     }
   }
 
-  data[12] = uvs[0] + bias / tex.width;
-  data[13] = uvs[1] + bias / tex.height;
-  data[14] = uvs[2] - bias / tex.width;
-  data[15] = uvs[3] - bias / tex.height;
+  data[12] = uvs[0] + ubias / tex.width;
+  data[13] = uvs[1] + vbias / tex.height;
+  data[14] = uvs[2] - ubias / tex.width;
+  data[15] = uvs[3] - vbias / tex.height;
 
   elem.uid = ++last_uid;
   elem.shader = shader || null;
@@ -407,6 +425,7 @@ export function draw() {
     if (elem.fn) {
       commitAndFlush();
       batch_state = null;
+      last_bound_shader = -1;
       elem.fn();
     } else {
       if (!batch_state ||
@@ -441,7 +460,7 @@ export function draw() {
   }
 }
 
-function buildRects(ws, hs) {
+export function buildRects(ws, hs) {
   let rects = [];
   let total_w = 0;
   for (let ii = 0; ii < ws.length; ++ii) {
@@ -515,6 +534,13 @@ function Sprite(params) {
   this.size = params.size || vec2(1, 1);
   this.color = params.color || vec4(1,1,1,1);
   this.uvs = params.uvs || vec4(0, 0, 1, 1);
+  if (!params.uvs) {
+    // Fix up non-power-of-two textures
+    this.texs[0].onLoad((tex) => {
+      this.uvs[2] = tex.src_width / tex.width;
+      this.uvs[3] = tex.src_height / tex.height;
+    });
+  }
 
   if (params.ws) {
     this.uidata = buildRects(params.ws, params.hs);
@@ -532,7 +558,7 @@ Sprite.prototype.draw = function (params) {
   let h = (params.h || 1) * this.size[1];
   let uvs = (typeof params.frame === 'number') ? this.uidata.rects[params.frame] : (params.uvs || this.uvs);
   queuesprite(this, params.x, params.y, params.z, w, h, params.rot, uvs, params.color || this.color,
-    params.shader, params.shader_params);
+    params.shader, params.shader_params, params.nozoom);
 };
 
 Sprite.prototype.drawDualTint = function (params) {

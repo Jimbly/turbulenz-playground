@@ -2,7 +2,7 @@
 <html>
   <head>
     <title>Powered by GLOV.js</title>
-    <meta name="viewport" content="width=device-width,height=device-height,initial-scale=1">
+    <meta name="viewport" content="width=device-width,height=device-height,initial-scale=1,user-scalable=0,shrink-to-fit=no,maximum-scale=1">
     <meta name="Description" content="Something useful here for Google" />
 
     <meta property="og:title" content="Powered by GLOV.js">
@@ -16,16 +16,17 @@
     <link rel="stylesheet" type="text/css" href="main.css">
   </head>
   <body>
-    <div id="debug"></div>
+    <div id="debug_overlay"><div id="debug" class="noglov"></div></div>
     <div id="content">
       <canvas id="canvas" moz-opaque="true" tabindex="1">
-        Sorry, but your browser does not support WebGL or does not have it
-        enabled.  To get a WebGL-enabled browser, please see:<br/>
-        <a href="http://www.khronos.org/webgl/wiki/Getting_a_WebGL_Implementation" target="_blank">
-          Getting a WebGL Implementation
-        </a>
+        Sorry, but your browser does not support WebGL or does not have it enabled.  Please check:<br/>
+        <a href="https://get.webgl.org/">get.webgl.org</a> or <a href="http://www.khronos.org/webgl/wiki/Getting_a_WebGL_Implementation" target="_blank">Getting a WebGL Implementation</a>
       </canvas>
-      <div id="loading" class="screenwrap vflex">
+      <div id="nowebgl" class="screenwrap" style="visibility: hidden">
+        Sorry, but your browser does not support WebGL or does not have it enabled.  Please check:<br/>
+        <a href="https://get.webgl.org/">get.webgl.org</a> or <a href="http://www.khronos.org/webgl/wiki/Getting_a_WebGL_Implementation" target="_blank">Getting a WebGL Implementation</a>
+      </div>
+	  <div id="loading" class="screenwrap vflex">
         <div class="flexcenter" style="flex:1; text-align: center;">
         </div>
         <div class="flexcenter" style="text-align: center; width:100%;">
@@ -75,7 +76,7 @@
     <script src="vendor/jslib/webgl/sounddevice.js"></script>
     <script src="vendor/jslib/vmath.js"></script>
     <!-- endbuild -->
+    <script src="app.bundle.js"></script>
 
-    <script src="wrapper.bundle.js"></script>
   </body>
 </html>

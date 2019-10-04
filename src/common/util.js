@@ -1,4 +1,19 @@
-const { abs, floor, min, max, round, pow, sqrt } = Math;
+// Portions Copyright 2019 Jimb Esser (https://github.com/Jimbly/)
+// Released under MIT License: https://opensource.org/licenses/MIT
+
+const assert = require('assert');
+const { abs, floor, min, max, random, round, pow, sqrt } = Math;
+
+export function nop() {
+  // empty
+}
+
+export function empty(obj) {
+  for (let key in obj) {
+    return false;
+  }
+  return true;
+}
 
 export function easeInOut(v, a) {
   let va = pow(v, a);
@@ -24,9 +39,13 @@ export function merge(dest, src) {
   return dest;
 }
 
+export function has(obj, field) {
+  return Object.prototype.hasOwnProperty.call(obj, field);
+}
+
 export function defaults(dest, src) {
   for (let f in src) {
-    if (!Object.prototype.hasOwnProperty.call(dest, f)) {
+    if (!has(dest, f)) {
       dest[f] = src[f];
     }
   }
@@ -51,6 +70,11 @@ export function mix(v0, v1, a) { // GLSL semantics
 
 export function sign(a) {
   return a < 0 ? -1 : a > 0 ? 1 : 0;
+}
+
+export function ridx(arr, idx) {
+  arr[idx] = arr[arr.length - 1];
+  arr.pop();
 }
 
 export function round100(a) {
@@ -100,4 +124,57 @@ export function lineCircleIntersect(p1, p2, pCircle, radius) {
   }
 
   return false;
+}
+
+export function inherits(ctor, superCtor) {
+  // From Node.js
+  assert(typeof superCtor === 'function');
+  // not needed? ctor.super_ = superCtor; // eslint-disable-line no-underscore-dangle
+  ctor.prototype = Object.create(superCtor.prototype, {
+    constructor: {
+      value: ctor,
+      enumerable: false,
+      writable: true,
+      configurable: true
+    }
+  });
+}
+
+export function isPowerOfTwo(n) {
+  return ((n & (n - 1)) === 0); // eslint-disable-line no-bitwise
+}
+
+export function nextHighestPowerOfTwo(x) {
+  --x;
+  for (let i = 1; i < 32; i <<= 1) { // eslint-disable-line no-bitwise
+    x |= x >> i; // eslint-disable-line no-bitwise
+  }
+  return x + 1;
+}
+
+export function logdata(data) {
+  if (data === undefined) {
+    return '';
+  }
+  let r = JSON.stringify(data);
+  if (r.length < 120) {
+    return r;
+  }
+  return `${r.slice(0, 120-3)}...`;
+}
+
+export function isInteger(v) {
+  return typeof v === 'number' && isFinite(v) && floor(v) === v;
+}
+
+export function toNumber(v) {
+  return Number(v);
+}
+
+export function randomNot(not_value, max_value) {
+  let new_value;
+  do {
+    new_value = floor(random() * max_value);
+  } while (new_value === not_value);
+  return new_value;
 }

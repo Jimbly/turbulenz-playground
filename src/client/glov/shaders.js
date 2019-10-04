@@ -43,10 +43,12 @@ let error_fp;
 let error_vp;
 
 const vp_attr_regex = /attribute [^ ]+ ([^ ;]+);/gu;
-const uniform_regex = /uniform (?:(?:low|medium|high)p )?((?:vec|mat)\d [^ ;]+);/gu;
+const uniform_regex = /uniform (?:(?:low|medium|high)p )?((?:(?:vec|mat)\d(?:x\d)?|float) [^ ;]+);/gu;
 const sampler_regex = /uniform sampler2D ([^ ;]+);/gu;
+const include_regex = /\n#include "([^"]+)"/gu;
 
 const type_size = {
+  float: 1,
   vec2: 2*1,
   vec3: 3*1,
   vec4: 4*1,
@@ -54,8 +56,41 @@ const type_size = {
   mat4: 4*4,
 };
 
+let includes = {};
+
+export function addInclude(key, text) {
+  assert(!includes[key]);
+  includes[key] = `\n// from include "${key}":\n${text}\n`;
+}
+
+function parseIncludes(text) {
+  let supplied_uniforms = {};
+  text.replace(uniform_regex, function (str, key) {
+    supplied_uniforms[key] = true;
+  });
+  text = text.replace(include_regex, function (str, filename) {
+    let replacement = includes[filename];
+    if (!replacement) {
+      console.error(`Could not evaluate ${str}`);
+      return str;
+    }
+    // Remove duplicate uniforms
+    replacement = replacement.replace(uniform_regex, function (str2, key) {
+      if (supplied_uniforms[key]) {
+        return `// [removed ${key}]`;
+      }
+      supplied_uniforms[key] = true;
+      return str2;
+    });
+    return replacement;
+  });
+  return text;
+}
+
 function Shader(type, text) {
   text = `${defines}${text}`;
+  text = parseIncludes(text);
+  text = text.replace(/#pragma WebGL/gu, '');
   this.shader = gl.createShader(type);
   if (type === gl.VERTEX_SHADER) {
     this.programs = {};
@@ -95,6 +130,9 @@ export function create(...args) {
 
 function uniformSetValue(unif) {
   switch (unif.width) { // eslint-disable-line default-case
+    case 1:
+      gl.uniform1fv(unif.location, unif.value);
+      break;
     case 2:
       gl.uniform2fv(unif.location, unif.value);
       break;
@@ -230,4 +268,9 @@ export function startup(_globals) {
 
   error_fp = create(gl.FRAGMENT_SHADER, fs.readFileSync(`${__dirname}/shaders/error.fp`, 'utf8'));
   error_vp = create(gl.VERTEX_SHADER, fs.readFileSync(`${__dirname}/shaders/error.vp`, 'utf8'));
+}
+
+export function addGlobal(key, vec) {
+  assert(!globals[key]);
+  globals[key] = vec;
 }
