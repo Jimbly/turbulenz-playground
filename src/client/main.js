@@ -50,6 +50,10 @@ export function main() {
   // Perfect sizes for pixely modes
   ui.scaleSizes(13 / 32);
   ui.setFontHeight(8);
+  let style_labels = ui.font.style({
+    outline_width: 4.0,
+    outline_color: 0x000000ff,
+  });
 
   const createSprite = sprites.create;
 
@@ -64,7 +68,7 @@ export function main() {
     frequency: 2,
     amplitude: 1,
     persistence: 0.5,
-    lacunarity: 2.0,
+    lacunarity: { min: 1.6, max: 2.8, freq: 0.3 },
     octaves: 6,
     cutoff: 100,
     domain_warp: 0,
@@ -87,16 +91,33 @@ export function main() {
     for (let ii = 0; ii < noise_warp.length; ++ii) {
       noise_warp[ii] = new SimplexNoise(`${opts.seed}w${ii}`);
     }
+    let noise_field = {};
 
     let total_amplitude = 0;  // Used for normalizing result to 0.0 - 1.0
     {
       let amp = opts.amplitude;
+      let p = opts.persistence && opts.persistence.max || opts.persistence;
       for (let ii=0; ii<opts.octaves; ii++) {
         total_amplitude += amp;
-        amp *= opts.persistence;
+        amp *= p;
       }
     }
     let sample_pos = vec2();
+    for (let f in opts) {
+      let v = opts[f];
+      if (typeof v === 'object') {
+        noise_field[f] = new SimplexNoise(`${opts.seed}f${f}`);
+        v.mul = (v.max - v.min) * 0.5;
+        v.add = v.min + v.mul;
+      }
+    }
+    function get(field) {
+      let v = opts[field];
+      if (typeof v !== 'object') {
+        return v;
+      }
+      return v.add + v.mul * noise_field[field].noise2D(sample_pos[0] * v.freq, sample_pos[1] * v.freq);
+    }
     function sample() {
       v2copy(sample_pos, unif_pos);
       let warp_freq = opts.warp_freq;
@@ -109,11 +130,13 @@ export function main() {
       }
       let total = 0;
       let amp = opts.amplitude;
-      let freq = opts.frequency;
+      let freq = get('frequency');
+      let p = get('persistence');
+      let lac = get('lacunarity');
       for (let i=0; i<opts.octaves; i++) {
         total += (0.5 + 0.5 * noise[i].noise2D(sample_pos[0] * freq, sample_pos[1] * freq)) * amp;
-        amp *= opts.persistence;
-        freq *= opts.lacunarity;
+        amp *= p;
+        freq *= lac;
       }
       return total/total_amplitude;
     }
@@ -128,7 +151,6 @@ export function main() {
     const HEX_HEIGHT = 1.0; // distance between any two hexes = 1.0
     const HEX_EDGE = HEX_HEIGHT / sqrt(3);
     const HEX_WIDTH = 1.5 * HEX_EDGE;
-    let cutoff_scale = opts.cutoff / 255;
     for (let jj = 0; jj < height; ++jj) {
       for (let ii = 0; ii < width; ++ii) {
         world_pos[0] = ii * HEX_WIDTH;
@@ -140,11 +162,13 @@ export function main() {
         unif_pos[1] = world_pos[1] / ((height - 1.5) * HEX_HEIGHT) * 2.0 - 1.0;
 
         let h = sample(); // random()
+        let cutoff = get('cutoff');
+        //let cutoff_scale = cutoff / 255; // scale cutoff to extend nearer to edge of maps
         //h *= cutoff_scale + (1 - cutoff_scale) * (1 - v2lengthSq(unif_pos));
         h *= 1 - v2lengthSq(unif_pos);
 
         h = clamp(floor(h * 255), 0.0, 255);
-        setColor(ii, jj, h > opts.cutoff ? 255 : 0, 0, 0, 0);
+        setColor(ii, jj, h > cutoff ? 255 : 0, 0, 0, 0);
       }
     }
     if (!debug_texture) {
@@ -196,36 +220,73 @@ export function main() {
     // }
     // y += button_spacing;
 
-    function slider(field, min_v, max_v, fixed) {
-      let old_value = opts[field];
-      opts[field] = ui.slider(opts[field], {
+    function sliderInternal(field, value, min_v, max_v, fixed) {
+      let old_value = value;
+      value = ui.slider(value, {
         x, y,
         min: min_v,
         max: max_v,
       });
       if (!fixed) {
-        opts[field] = round(opts[field]);
+        value = round(value);
       } else if (fixed === 1) {
-        opts[field] = round(opts[field] * 10) / 10;
+        value = round(value * 10) / 10;
       } else if (fixed === 2) {
-        opts[field] = round(opts[field] * 100) / 100;
+        value = round(value * 100) / 100;
       }
-      ui.print(null, x + ui.button_width + 4, y, Z.UI, `${field}: ${opts[field].toFixed(fixed)}`);
+      ui.print(style_labels, x + ui.button_width + 4, y, Z.UI, `${field}: ${value.toFixed(fixed)}`);
       y += button_spacing;
-      if (old_value !== opts[field]) {
+      if (old_value !== value) {
         need_regen = true;
+      }
+      return value;
+    }
+
+    let x0 = x;
+    function slider(field, min_v, max_v, fixed, ex) {
+      x = x0;
+      let is_ex = false;
+      if (ex) {
+        is_ex = typeof opts[field] === 'object';
+        if (ui.buttonText({ x, y, text: is_ex ? 'v' : '-',
+          w: ui.button_height })
+        ) {
+          is_ex = !is_ex;
+          if (is_ex) {
+            opts[field] = {
+              min: opts[field],
+              max: opts[field],
+              freq: 1,
+            };
+          } else {
+            opts[field] = opts[field].max;
+          }
+          need_regen = true;
+        }
+        x += 16;
+      }
+      if (is_ex) {
+        ui.print(style_labels, x, y, Z.UI, `${field}`);
+        y += button_spacing;
+        opts[field].min = sliderInternal('min', opts[field].min, min_v, max_v, fixed);
+        opts[field].max = sliderInternal('max', opts[field].max, min_v, max_v, fixed);
+        opts[field].freq = sliderInternal('freq', opts[field].freq, 0.1, 2, 1);
+      } else {
+        opts[field] = sliderInternal(field, opts[field], min_v, max_v, fixed);
       }
     }
     slider('seed', 0, 100, 0);
-    slider('cutoff', 0, 255, 0);
-    slider('frequency', 0.01, 10, 1);
+    slider('cutoff', 0, 255, 0, true);
+    slider('frequency', 0.1, 10, 1, true);
     //slider('amplitude', 0.01, 10, 2);
-    slider('persistence', 0.01, 2, 2);
-    slider('lacunarity', 0.01, 10.0, 2);
+    slider('persistence', 0.01, 2, 2, true);
+    slider('lacunarity', 1, 10.0, 2, true);
     slider('octaves', 1, 10, 0);
     slider('domain_warp', 0, 2, 0);
-    slider('warp_freq', 0.01, 3, 1);
-    slider('warp_amp', 0, 2, 2);
+    if (opts.domain_warp) {
+      slider('warp_freq', 0.01, 3, 1);
+      slider('warp_amp', 0, 2, 2);
+    }
   }
 
   function testInit(dt) {
