@@ -67,6 +67,19 @@ void main(void) {
   vec4 tex = texture2D(tex0, texcoords);
   vec3 color = tex.x * interp_color.rgb;
   float alpha = interp_color.a;
+  int debug = int(tex.y * 255.0 + 0.1);
+  if (debug > 2) {
+    // inland sea
+    color.g = 0.25;
+    color.b = 1.0;
+  } else if (debug > 1) {
+    // border
+    color.r = 1.0;
+    color.b = 0.5;
+  } else if (debug > 0) {
+    // ocean
+    color.b = 1.0;
+  }
   if (ix < 0.0 || ix >= hex_param.x || iy < 0.0 || iy >= hex_param.x) {
     alpha = 0.0;
   }

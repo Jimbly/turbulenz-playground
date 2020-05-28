@@ -1,5 +1,4 @@
 Iterate on noise
-- Fill or channel inland seas
 - cutoff should be a percentage, and choose ocean level that fits?
 
 https://www.reddit.com/r/proceduralgeneration/comments/gi4hq4/geologically_reasonable_maps_seed_2/fqe9pt0/

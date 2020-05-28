@@ -1,11 +1,13 @@
-/*eslint global-require:off*/
+/*eslint global-require:off, no-labels:off*/
 const glov_local_storage = require('./glov/local_storage.js');
-glov_local_storage.storage_prefix = 'glovjs-playground'; // Before requiring anything else that might load from this
+glov_local_storage.storage_prefix = 'macrogen'; // Before requiring anything else that might load from this
 
+const assert = require('assert');
 const camera2d = require('./glov/camera2d.js');
 const engine = require('./glov/engine.js');
 const { min, floor, round, sqrt } = Math;
 const net = require('./glov/net.js');
+const { randCreate } = require('./glov/rand_alea.js');
 const shaders = require('./glov/shaders.js');
 const SimplexNoise = require('simplex-noise');
 const sprites = require('./glov/sprites.js');
@@ -74,15 +76,19 @@ export function main() {
     domain_warp: 0,
     warp_freq: 1,
     warp_amp: 0.1,
+    fill_seas: true,
+    channels: true,
   };
   function updateDebugTexture() {
     let start = Date.now();
     let width = hex_tex_size;
     let height = width;
-    let data = new Uint8Array(width * height * 4);
+    let BPP = 4;
+    let data = new Uint8Array(width * height * BPP);
     let unif_pos = vec2();
     let world_pos = vec2();
 
+    let rand = randCreate(opts.seed);
     let noise = new Array(opts.octaves);
     for (let ii = 0; ii < noise.length; ++ii) {
       noise[ii] = new SimplexNoise(`${opts.seed}n${ii}`);
@@ -171,6 +177,129 @@ export function main() {
         setColor(ii, jj, h > cutoff ? 255 : 0, 0, 0, 0);
       }
     }
+
+    function fillSeas() {
+      let id_factor = width;
+      let todo = [];
+      let done = [];
+      function fillBorders() {
+        for (let ii = 0; ii < width; ++ii) {
+          data[ii * BPP + 1] = 2;
+          data[((height - 1) * width + ii) * BPP + 1] = 2;
+        }
+        for (let ii = 0; ii < height; ++ii) {
+          data[width * ii * BPP + 1] = 2;
+          data[(width * ii + width - 1) * BPP + 1] = 2;
+        }
+      }
+      fillBorders();
+      function tryMark(pos, v) {
+        if (data[pos * BPP] || data[pos * BPP + 1]) {
+          return;
+        }
+        data[pos * BPP + 1] = v;
+        todo.push(pos);
+        done.push(pos);
+      }
+      let neighbors_even = [
+        -id_factor, id_factor, // above, below
+        -1, -1 - id_factor, // upper left, lower left
+        1, 1 - id_factor, // upper right, lower right
+      ];
+      let neighbors_odd = [
+        -id_factor, id_factor, // above, below
+        -1 + id_factor, -1,  // upper left, lower left
+        1 + id_factor, 1, // upper right, lower right
+      ];
+      function spreadSeas(v) {
+        while (todo.length) {
+          let pos = todo.pop();
+          let x = pos % id_factor;
+          let neighbors = (x & 1) ? neighbors_odd : neighbors_even;
+          for (let ii = 0; ii < neighbors.length; ++ii) {
+            tryMark(pos + neighbors[ii], v);
+          }
+        }
+      }
+      tryMark(id_factor + 1, 1);
+      spreadSeas(1);
+      // Find all inland seas, mark them, then grow them N steps to either find a channel or fill them
+      let inland_seas = [];
+      for (let idx=0, pos = 0; pos < width * height; ++pos, idx += BPP) {
+        if (!data[idx] && !data[idx + 1]) {
+          // open, and not an ocean or previously marked
+          done = [];
+          tryMark(pos, 3);
+          spreadSeas(3);
+          inland_seas.push(done);
+        }
+      }
+      function shuffleArray(arr) {
+        for (let ii = arr.length - 1; ii >= 1; --ii) {
+          let swap = rand.range(ii + 1);
+          let t = arr[ii];
+          arr[ii] = arr[swap];
+          arr[swap] = t;
+        }
+      }
+      shuffleArray(inland_seas);
+      inland_seas.forEach(function (sea) {
+        // Channel to ocean if possible
+        let is_ocean = false;
+        if (opts.channels) {
+          let checked = [];
+          for (let ii = 0; ii < sea.length; ++ii) {
+            checked[sea[ii]] = 1;
+          }
+          let adjacent = [];
+          for (let ii = 0; ii < sea.length; ++ii) {
+            let pos = sea[ii];
+            let x = pos % id_factor;
+            let neighbors = (x & 1) ? neighbors_odd : neighbors_even;
+            for (let nidx = 0; nidx < neighbors.length; ++nidx) {
+              let npos = pos + neighbors[nidx];
+              if (!checked[npos]) {
+                adjacent.push(npos);
+                // if (!data[npos * BPP]) {
+                //   // a neighboring sea already channeled this, it must connect to the ocean!
+                // }
+                checked[npos] = 1;
+              }
+            }
+          }
+          shuffleArray(adjacent);
+          outer:
+          for (let ii = 0; ii < adjacent.length; ++ii) {
+            let pos = adjacent[ii];
+            let x = pos % id_factor;
+            let neighbors = (x & 1) ? neighbors_odd : neighbors_even;
+            for (let nidx = 0; nidx < neighbors.length; ++nidx) {
+              let npos = pos + neighbors[nidx];
+              if (!checked[npos] && !data[npos * BPP] && data[npos * BPP + 1] === 1) {
+                // open route to the ocean!
+                data[pos*BPP] = 0;
+                sea.push(pos);
+                data[npos*BPP] = 0;
+                sea.push(npos);
+                for (let jj = 0; jj < sea.length; ++jj) {
+                  data[sea[jj]*BPP + 1] = 1;
+                }
+                is_ocean = true;
+                break outer;
+              }
+            }
+          }
+        }
+        if (!is_ocean && opts.fill_seas) {
+          for (let ii = 0; ii < sea.length; ++ii) {
+            data[sea[ii] * BPP] = 255;
+            data[sea[ii] * BPP + 1] = 0;
+          }
+        }
+      });
+    }
+    fillSeas();
+
     if (!debug_texture) {
       debug_texture = textures.load({
         name: 'proc_gen_debug',
@@ -275,8 +404,15 @@ export function main() {
         opts[field] = sliderInternal(field, opts[field], min_v, max_v, fixed);
       }
     }
+    function toggle(field) {
+      if (ui.buttonText({ x, y, text: `${field}: ${opts[field] ? 'ON': 'off'}` })) {
+        opts[field] = !opts[field];
+        need_regen = true;
+      }
+      y += button_spacing;
+    }
     slider('seed', 0, 100, 0);
-    slider('cutoff', 0, 255, 0, true);
+    slider('cutoff', 3, 255, 0, true);
     slider('frequency', 0.1, 10, 1, true);
     //slider('amplitude', 0.01, 10, 2);
     slider('persistence', 0.01, 2, 2, true);
@@ -287,6 +423,8 @@ export function main() {
       slider('warp_freq', 0.01, 3, 1);
       slider('warp_amp', 0, 2, 2);
     }
+    toggle('fill_seas');
+    toggle('channels');
   }
 
   function testInit(dt) {
