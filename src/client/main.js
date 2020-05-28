@@ -2,7 +2,6 @@
 const glov_local_storage = require('./glov/local_storage.js');
 glov_local_storage.storage_prefix = 'macrogen'; // Before requiring anything else that might load from this
 
-const assert = require('assert');
 const camera2d = require('./glov/camera2d.js');
 const engine = require('./glov/engine.js');
 const { min, floor, round, sqrt } = Math;
@@ -72,7 +71,7 @@ export function main() {
     persistence: 0.5,
     lacunarity: { min: 1.6, max: 2.8, freq: 0.3 },
     octaves: 6,
-    cutoff: 100,
+    cutoff: 0.5,
     domain_warp: 0,
     warp_freq: 1,
     warp_amp: 0.1,
@@ -147,16 +146,13 @@ export function main() {
       return total/total_amplitude;
     }
 
-    function setColor(x, y, r, g, b, a) {
-      let offs = (y * width + x) * 4;
-      data[offs] = r;
-      data[offs+1] = g;
-      data[offs+2] = b;
-      data[offs+3] = a;
-    }
     const HEX_HEIGHT = 1.0; // distance between any two hexes = 1.0
     const HEX_EDGE = HEX_HEIGHT / sqrt(3);
     const HEX_WIDTH = 1.5 * HEX_EDGE;
+    let count_by_h = new Array(256);
+    for (let ii = 0; ii < 256; ++ii) {
+      count_by_h[ii] = 0;
+    }
     for (let jj = 0; jj < height; ++jj) {
       for (let ii = 0; ii < width; ++ii) {
         world_pos[0] = ii * HEX_WIDTH;
@@ -168,14 +164,29 @@ export function main() {
         unif_pos[1] = world_pos[1] / ((height - 1.5) * HEX_HEIGHT) * 2.0 - 1.0;
 
         let h = sample(); // random()
-        let cutoff = get('cutoff');
         //let cutoff_scale = cutoff / 255; // scale cutoff to extend nearer to edge of maps
         //h *= cutoff_scale + (1 - cutoff_scale) * (1 - v2lengthSq(unif_pos));
         h *= 1 - v2lengthSq(unif_pos);
 
         h = clamp(floor(h * 255), 0.0, 255);
-        setColor(ii, jj, h > cutoff ? 255 : 0, 0, 0, 0);
+        count_by_h[h]++;
+        data[(jj * width + ii) * BPP] = h;
       }
+    }
+    // Determine cutoff as a percentile
+    //   Probably not generally necessary, but allows for playing with domain-warped
+    //   persistence sliders without changing the overall density, etc.
+    let cutoff_percent = get('cutoff');
+    cutoff_percent = 1 - (1 - cutoff_percent) * (1 - cutoff_percent);
+    let total_size = width * height;
+    let cutoff_count = total_size * cutoff_percent;
+    let cutoff = 0;
+    for (cutoff = 0; cutoff_count > 0 && cutoff < 256; ++cutoff) {
+      cutoff_count -= count_by_h[cutoff];
+    }
+    for (let ii = 0; ii < total_size; ++ii) {
+      let h = data[ii * BPP];
+      data[ii * BPP] = h > cutoff ? 255 : 0;
     }
 
     function fillSeas() {
@@ -412,7 +423,7 @@ export function main() {
       y += button_spacing;
     }
     slider('seed', 0, 100, 0);
-    slider('cutoff', 3, 255, 0, true);
+    slider('cutoff', 0.15, 1.0, 2);
     slider('frequency', 0.1, 10, 1, true);
     //slider('amplitude', 0.01, 10, 2);
     slider('persistence', 0.01, 2, 2, true);
