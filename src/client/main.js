@@ -2,19 +2,20 @@
 const glov_local_storage = require('./glov/local_storage.js');
 glov_local_storage.storage_prefix = 'glovjs-playground'; // Before requiring anything else that might load from this
 
+const camera2d = require('./glov/camera2d.js');
 const engine = require('./glov/engine.js');
-const glov_font = require('./glov/font.js');
-const input = require('./glov/input.js');
+const { min, floor, round, sqrt } = Math;
 const net = require('./glov/net.js');
-const particles = require('./glov/particles.js');
-const glov_sprites = require('./glov/sprites.js');
-const sprite_animation = require('./glov/sprite_animation.js');
-const transition = require('./glov/transition.js');
+const shaders = require('./glov/shaders.js');
+const SimplexNoise = require('simplex-noise');
+const sprites = require('./glov/sprites.js');
+const textures = require('./glov/textures.js');
 const ui = require('./glov/ui.js');
-const ui_test = require('./glov/ui_test.js');
-const particle_data = require('./particle_data.js');
-const { soundLoad, soundPlay, soundPlayMusic, FADE_IN, FADE_OUT } = require('./glov/sound.js');
-const { vec2, vec4, v4clone, v4copy } = require('./glov/vmath.js');
+const { clamp } = require('../common/util.js');
+const {
+  vec2, v2copy, v2lengthSq,
+  vec4,
+} = require('./glov/vmath.js');
 
 window.Z = window.Z || {};
 Z.BACKGROUND = 1;
@@ -27,83 +28,6 @@ Z.UI_TEST = 200;
 export const game_width = 320;
 export const game_height = 240;
 
-export let sprites = {};
-
-const music_file = 'music_test.webm';
-
-// Persistent flags system for testing parameters
-let flags = {};
-function flagGet(key, dflt) {
-  if (flags[key] === undefined) {
-    flags[key] = glov_local_storage.getJSON(`flag_${key}`, dflt) || false;
-  }
-  return flags[key];
-}
-function flagToggle(key) {
-  flags[key] = !flagGet(key);
-  glov_local_storage.setJSON(`flag_${key}`, flags[key]);
-}
-function flagSet(key, value) {
-  flags[key] = value;
-  glov_local_storage.setJSON(`flag_${key}`, flags[key]);
-}
-
-const color_white = vec4(1, 1, 1, 1);
-
-function perfTestSprites() {
-  if (!sprites.test) {
-    sprites.test = [
-      glov_sprites.create({ name: 'test', size: vec2(1, 1), origin: vec2(0.5, 0.5) }),
-      glov_sprites.create({ url: 'img/test.png?1', size: vec2(1, 1), origin: vec2(0.5, 0.5) }),
-    ];
-  }
-
-  let mode = 2;
-  let count = [
-    80000, // one sprite, pre-sorted
-    40000, // one sprite, unsorted
-    20000, // two sprites, unsorted, small batches
-    60000, // two sprites, sorted, bigger batches, sprite API
-    60000, // two sprites, sorted, bigger batches, raw API
-  ][mode];
-  if (mode === 3 || mode === 4) {
-    for (let ii = 0; ii < count;) {
-      let subc = Math.floor(500 + Math.random() * 100);
-      let idx = mode <= 1 ? 0 : Math.round(Math.random());
-      let sprite = sprites.test[idx];
-      let z = Math.random();
-      for (let jj = 0; jj < subc; ++jj) {
-        if (mode === 4) {
-          // glov_sprites.queueraw(sprite.texs,
-          //   Math.random() * game_width - 3, Math.random() * game_height - 3, z,
-          //   6, 6, 0, 0, 1, 1, color_white);
-          glov_sprites.queuesprite(sprite,
-            Math.random() * game_width, Math.random() * game_height, z,
-            6 * sprite.size[0], 6 * sprite.size[1], 0, sprite.uvs, color_white);
-        } else {
-          sprites.test[idx].draw({
-            x: Math.random() * game_width,
-            y: Math.random() * game_height,
-            z,
-            w: 6, h: 6,
-          });
-        }
-      }
-      ii += subc;
-    }
-  } else {
-    for (let ii = 0; ii < count; ++ii) {
-      let idx = mode <= 1 ? 0 : Math.round(Math.random());
-      sprites.test[idx].draw({
-        x: Math.random() * game_width,
-        y: Math.random() * game_height,
-        z: mode === 0 ? ii : Math.random(),
-        w: 6, h: 6,
-      });
-    }
-  }
-}
-
 export function main() {
   if (engine.DEBUG) {
     // Enable auto-reload, etc
@@ -111,237 +35,203 @@ export function main() {
   }
 
   if (!engine.startup({
+    antialias: true,
     game_width,
     game_height,
-    pixely: flagGet('pixely', 'on'),
+    pixely: 'on',
     viewport_postprocess: false,
+    do_borders: false,
   })) {
     return;
   }
 
-  // const font = engine.font;
+  let shader_hex = shaders.create('shaders/hex.fp');
 
   // Perfect sizes for pixely modes
   ui.scaleSizes(13 / 32);
   ui.setFontHeight(8);
 
-  const createSprite = glov_sprites.create;
-  const createAnimation = sprite_animation.create;
+  const createSprite = sprites.create;
 
-  const color_red = vec4(1, 0, 0, 1);
-  const color_yellow = vec4(1, 1, 0, 1);
+  let hex_tex_size = 256;
+  let hex_param = vec4(hex_tex_size, 0, 0, 0);
+  shaders.addGlobal('hex_param', hex_param);
 
-  // Cache KEYS
-  const KEYS = input.KEYS;
-  const PAD = input.PAD;
+  let debug_texture;
+  let debug_sprite;
+  let opts = {
+    seed: 1,
+    frequency: 2,
+    amplitude: 1,
+    persistence: 0.5,
+    lacunarity: 2.0,
+    octaves: 6,
+    cutoff: 100,
+    domain_warp: 0,
+    warp_freq: 1,
+    warp_amp: 0.1,
+  };
+  function updateDebugTexture() {
+    let start = Date.now();
+    let width = hex_tex_size;
+    let height = width;
+    let data = new Uint8Array(width * height * 4);
+    let unif_pos = vec2();
+    let world_pos = vec2();
 
-  const sprite_size = 64;
-  function initGraphics() {
-    particles.preloadParticleData(particle_data);
+    let noise = new Array(opts.octaves);
+    for (let ii = 0; ii < noise.length; ++ii) {
+      noise[ii] = new SimplexNoise(`${opts.seed}n${ii}`);
+    }
+    let noise_warp = new Array(opts.domain_warp);
+    for (let ii = 0; ii < noise_warp.length; ++ii) {
+      noise_warp[ii] = new SimplexNoise(`${opts.seed}w${ii}`);
+    }
 
-    soundLoad('test');
+    let total_amplitude = 0;  // Used for normalizing result to 0.0 - 1.0
+    {
+      let amp = opts.amplitude;
+      for (let ii=0; ii<opts.octaves; ii++) {
+        total_amplitude += amp;
+        amp *= opts.persistence;
+      }
+    }
+    let sample_pos = vec2();
+    function sample() {
+      v2copy(sample_pos, unif_pos);
+      let warp_freq = opts.warp_freq;
+      let warp_amp = opts.warp_amp;
+      for (let ii = 0; ii < opts.domain_warp; ++ii) {
+        let dx = noise_warp[ii].noise2D(sample_pos[0] * warp_freq, sample_pos[1] * warp_freq);
+        let dy = noise_warp[ii].noise2D((sample_pos[0] + 7) * warp_freq, sample_pos[1] * warp_freq);
+        sample_pos[0] += dx * warp_amp;
+        sample_pos[1] += dy * warp_amp;
+      }
+      let total = 0;
+      let amp = opts.amplitude;
+      let freq = opts.frequency;
+      for (let i=0; i<opts.octaves; i++) {
+        total += (0.5 + 0.5 * noise[i].noise2D(sample_pos[0] * freq, sample_pos[1] * freq)) * amp;
+        amp *= opts.persistence;
+        freq *= opts.lacunarity;
+      }
+      return total/total_amplitude;
+    }
 
-    sprites.white = createSprite({ url: 'white' });
+    function setColor(x, y, r, g, b, a) {
+      let offs = (y * width + x) * 4;
+      data[offs] = r;
+      data[offs+1] = g;
+      data[offs+2] = b;
+      data[offs+3] = a;
+    }
+    const HEX_HEIGHT = 1.0; // distance between any two hexes = 1.0
+    const HEX_EDGE = HEX_HEIGHT / sqrt(3);
+    const HEX_WIDTH = 1.5 * HEX_EDGE;
+    let cutoff_scale = opts.cutoff / 255;
+    for (let jj = 0; jj < height; ++jj) {
+      for (let ii = 0; ii < width; ++ii) {
+        world_pos[0] = ii * HEX_WIDTH;
+        world_pos[1] = jj * HEX_HEIGHT - HEX_HEIGHT * 0.5;
+        if (ii & 1) {
+          world_pos[1] += HEX_HEIGHT * 0.5;
+        }
+        unif_pos[0] = world_pos[0] / ((width - 1) * HEX_WIDTH) * 2.0 - 1.0;
+        unif_pos[1] = world_pos[1] / ((height - 1.5) * HEX_HEIGHT) * 2.0 - 1.0;
 
-    sprites.test_tint = createSprite({
-      name: 'tinted',
-      ws: [16, 16, 16, 16],
-      hs: [16, 16, 16],
-      size: vec2(sprite_size, sprite_size),
-      layers: 2,
-      origin: vec2(0.5, 0.5),
-    });
-    sprites.animation = createAnimation({
-      idle_left: {
-        frames: [0,1],
-        times: [200, 500],
-      },
-      idle_right: {
-        frames: [3,2],
-        times: [200, 500],
-      },
-    });
-    sprites.animation.setState('idle_left');
+        let h = sample(); // random()
+        //h *= cutoff_scale + (1 - cutoff_scale) * (1 - v2lengthSq(unif_pos));
+        h *= 1 - v2lengthSq(unif_pos);
 
-    sprites.game_bg = createSprite({
-      url: 'white',
-      size: vec2(game_width, game_height),
-    });
+        h = clamp(floor(h * 255), 0.0, 255);
+        setColor(ii, jj, h > opts.cutoff ? 255 : 0, 0, 0, 0);
+      }
+    }
+    if (!debug_texture) {
+      debug_texture = textures.load({
+        name: 'proc_gen_debug',
+        format: textures.format.RGBA8,
+        width,
+        height,
+        data,
+        filter_min: gl.NEAREST,
+        filter_mag: gl.NEAREST,
+        wrap_s: gl.CLAMP_TO_EDGE,
+        wrap_t: gl.CLAMP_TO_EDGE,
+      });
+    } else {
+      debug_texture.updateData(width, height, data);
+    }
+    if (!debug_sprite) {
+      debug_sprite = createSprite({
+        texs: [debug_texture],
+      });
+    }
+    console.log(`Debug texture update in ${(Date.now() - start)}ms`);
   }
 
-  let last_particles = 0;
-
+  let need_regen = true;
+  let debug_uvs = vec4(0,hex_tex_size + 1,hex_tex_size + 1,0);
   function test(dt) {
-    if (!test.color_sprite) {
-      test.color_sprite = v4clone(color_white);
-      test.character = {
-        x: (Math.random() * (game_width - sprite_size - 200) + (sprite_size * 0.5) + 200),
-        y: (Math.random() * (game_height - sprite_size) + (sprite_size * 0.5)),
-      };
+    camera2d.setAspectFixed2(game_width, game_height);
+
+    if (need_regen) {
+      need_regen = false;
+      updateDebugTexture();
     }
 
-    if (flagGet('ui_test')) {
-      // let clip_test = 30;
-      // glov_sprites.clip(Z.UI_TEST - 10, Z.UI_TEST + 10, clip_test, clip_test, 320-clip_test * 2, 240-clip_test * 2);
-      ui_test.run(10, 10, Z.UI_TEST);
-    }
-    if (flagGet('font_test')) {
-      ui_test.runFontTest(105, 85);
-    }
-
-    test.character.dx = 0;
-    test.character.dx -= input.keyDown(KEYS.LEFT) + input.keyDown(KEYS.A) + input.padButtonDown(PAD.LEFT);
-    test.character.dx += input.keyDown(KEYS.RIGHT) + input.keyDown(KEYS.D) + input.padButtonDown(PAD.RIGHT);
-    test.character.dy = 0;
-    test.character.dy -= input.keyDown(KEYS.UP) + input.keyDown(KEYS.W) + input.padButtonDown(PAD.UP);
-    test.character.dy += input.keyDown(KEYS.DOWN) + input.keyDown(KEYS.S) + input.padButtonDown(PAD.DOWN);
-    if (test.character.dx < 0) {
-      sprites.animation.setState('idle_left');
-    } else if (test.character.dx > 0) {
-      sprites.animation.setState('idle_right');
-    }
-
-    test.character.x += test.character.dx * 0.05;
-    test.character.y += test.character.dy * 0.05;
-    let bounds = {
-      x: test.character.x - sprite_size/2,
-      y: test.character.y - sprite_size/2,
-      w: sprite_size,
-      h: sprite_size,
-    };
-    if (input.mouseDown() && input.mouseOver(bounds)) {
-      v4copy(test.color_sprite, color_yellow);
-    } else if (input.click(bounds)) {
-      v4copy(test.color_sprite, (test.color_sprite[2] === 0) ? color_white : color_red);
-      soundPlay('test');
-    } else if (input.mouseOver(bounds)) {
-      v4copy(test.color_sprite, color_white);
-      test.color_sprite[3] = 0.5;
-    } else {
-      v4copy(test.color_sprite, color_white);
-      test.color_sprite[3] = 1;
-    }
-
-    sprites.game_bg.draw({
-      x: 0, y: 0, z: Z.BACKGROUND,
-      color: [0, 0.72, 1, 1]
+    let debug_w = min(camera2d.w(), camera2d.h());
+    debug_sprite.draw({
+      x: camera2d.x1() - debug_w, y: camera2d.y0(),
+      w: debug_w, h: debug_w,
+      uvs: debug_uvs,
+      shader: shader_hex,
     });
-    sprites.test_tint.drawDualTint({
-      x: test.character.x,
-      y: test.character.y,
-      z: Z.SPRITES,
-      color: [1, 1, 0, 1],
-      color1: [1, 0, 1, 1],
-      frame: sprites.animation.getFrame(dt),
-    });
-
-    let font_test_idx = 0;
-
-    ui.print(glov_font.styleColored(null, 0x000000ff),
-      test.character.x, test.character.y + (++font_test_idx * 20), Z.SPRITES,
-      'TEXT!');
-    let font_style = glov_font.style(null, {
-      outline_width: 1.0,
-      outline_color: 0x800000ff,
-      glow_xoffs: 3.25,
-      glow_yoffs: 3.25,
-      glow_inner: -2.5,
-      glow_outer: 5,
-      glow_color: 0x000000ff,
-    });
-    ui.print(font_style,
-      test.character.x, test.character.y + (++font_test_idx * ui.font_height), Z.SPRITES,
-      'Outline and Drop Shadow');
 
     let x = ui.button_height;
     let button_spacing = ui.button_height + 2;
-    let y = game_height - 10 - button_spacing * 5;
-    if (ui.buttonText({ x, y, text: `Pixely: ${flagGet('pixely') || 'Off'}`,
-      tooltip: 'Toggles pixely or regular mode (requires reload)' })
-    ) {
-      if (flagGet('pixely') === 'strict') {
-        flagSet('pixely', false);
-      } else if (flagGet('pixely') === 'on') {
-        flagSet('pixely', 'strict');
-      } else {
-        flagSet('pixely', 'on');
-      }
-      if (document.location.reload) {
-        document.location.reload();
-      } else {
-        document.location = String(document.location);
-      }
-    }
-    y += button_spacing;
+    let y = x;
+    // if (ui.buttonText({ x, y, text: 'Regen' })) {
+    //   need_regen = true;
+    // }
+    // y += button_spacing;
 
-    if (ui.buttonText({ x, y, text: `Music: ${flagGet('music') ? 'ON' : 'OFF'}`,
-      tooltip: 'Toggles playing a looping background music track' })
-    ) {
-      flagToggle('music');
-      if (flagGet('music')) {
-        soundPlayMusic(music_file, 1, FADE_IN);
-      } else {
-        soundPlayMusic(music_file, 0, FADE_OUT);
+    function slider(field, min_v, max_v, fixed) {
+      let old_value = opts[field];
+      opts[field] = ui.slider(opts[field], {
+        x, y,
+        min: min_v,
+        max: max_v,
+      });
+      if (!fixed) {
+        opts[field] = round(opts[field]);
+      } else if (fixed === 1) {
+        opts[field] = round(opts[field] * 10) / 10;
+      } else if (fixed === 2) {
+        opts[field] = round(opts[field] * 100) / 100;
+      }
+      ui.print(null, x + ui.button_width + 4, y, Z.UI, `${field}: ${opts[field].toFixed(fixed)}`);
+      y += button_spacing;
+      if (old_value !== opts[field]) {
+        need_regen = true;
       }
     }
-    y += button_spacing;
-
-    if (ui.buttonText({ x, y, text: `Font Test: ${flagGet('font_test') ? 'ON' : 'OFF'}`,
-      tooltip: 'Toggles visibility of general Font tests' })
-    ) {
-      flagToggle('font_test');
-      transition.queue(Z.TRANSITION_FINAL, transition.randomTransition());
-    }
-    y += button_spacing;
-
-    if (ui.buttonText({ x, y, text: `UI Test: ${flagGet('ui_test') ? 'ON' : 'OFF'}`,
-      tooltip: 'Toggles visibility of general UI tests' })
-    ) {
-      flagToggle('ui_test');
-    }
-    y += button_spacing;
-
-    if (ui.buttonText({ x, y, text: `Particles: ${flagGet('particles', true) ? 'ON' : 'OFF'}`,
-      tooltip: 'Toggles particles' })
-    ) {
-      flagToggle('particles');
-    }
-    if (flagGet('particles')) {
-      if (engine.getFrameTimestamp() - last_particles > 1000) {
-        last_particles = engine.getFrameTimestamp();
-        engine.glov_particles.createSystem(particle_data.defs.explosion,
-          //[test.character.x, test.character.y, Z.PARTICLES]
-          [100 + Math.random() * 120, 100 + Math.random() * 140, Z.PARTICLES]
-        );
-      }
-    }
-
-    if (flagGet('perf_test')) {
-      perfTestSprites();
-    }
-
-    // Debuggin full canvas stretching
-    // const camera2d = require('./glov/camera2d.js');
-    // ui.drawLine(camera2d.x0(), camera2d.y0(), camera2d.x1(), camera2d.y1(), Z.BORDERS + 1, 1, 0.95,[1,0,1,0.5]);
-    // ui.drawLine(camera2d.x1(), camera2d.y0(), camera2d.x0(), camera2d.y1(), Z.BORDERS + 1, 1, 0.95,[1,0,1,0.5]);
-
-    // Debugging touch state on mobile
-    // const glov_camera2d = require('./glov/camera2d.js');
-    // engine.font.drawSizedWrapped(engine.fps_style, glov_camera2d.x0(), glov_camera2d.y0(), Z.FPSMETER,
-    //   glov_camera2d.w(), 0, 22, JSON.stringify({
-    //     last_touch_state: input.last_touch_state,
-    //     touch_state: input.touch_state,
-    //   }, undefined, 2));
+    slider('seed', 0, 100, 0);
+    slider('cutoff', 0, 255, 0);
+    slider('frequency', 0.01, 10, 1);
+    //slider('amplitude', 0.01, 10, 2);
+    slider('persistence', 0.01, 2, 2);
+    slider('lacunarity', 0.01, 10.0, 2);
+    slider('octaves', 1, 10, 0);
+    slider('domain_warp', 0, 2, 0);
+    slider('warp_freq', 0.01, 3, 1);
+    slider('warp_amp', 0, 2, 2);
   }
 
   function testInit(dt) {
     engine.setState(test);
-    if (flagGet('music')) {
-      soundPlayMusic(music_file);
-    }
     test(dt);
   }
 
-  initGraphics();
   engine.setState(testInit);
 }
