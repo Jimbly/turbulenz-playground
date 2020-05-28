@@ -1,4 +1,17 @@
-Iterate on noise
-- cutoff should be a percentage, and choose ocean level that fits?
+Place river mouths - on coast where two slope maps are lowest?
+  Maybe not?
 
+Next: re-read paper's method of choosing how to expand
+
+For now: Ever coast cell is a potential source
+  If someone expands over an unexplored one, that's fine, remove it from potential
+  Use rslope to decide where river should expand
+Start a second texture, as well as a Uint16 array that we can use for river ordinality
+  After expanding rivers, everything should be a river, calculate the strahler number for each, and put that in a texture, draw that? Or, texture needs a direction in each hex and draw a line? Or, we prune rivers, so hexes either are or are not a river at this scale of map?
+
+Calculate drainage basins
+Prune rivers and re-calc strahler numbers
+
+
+Contintent tweaks:
 https://www.reddit.com/r/proceduralgeneration/comments/gi4hq4/geologically_reasonable_maps_seed_2/fqe9pt0/

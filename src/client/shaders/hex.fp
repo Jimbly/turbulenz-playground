@@ -65,23 +65,41 @@ void main(void) {
   texcoords = (texcoords + 0.5) / hex_param.x;
 
   vec4 tex = texture2D(tex0, texcoords);
-  vec3 color = tex.x * interp_color.rgb;
+  vec3 color = vec3(1.0, 0.0, 1.0);
   float alpha = interp_color.a;
   int debug = int(tex.y * 255.0 + 0.1);
-  if (debug > 2) {
-    // inland sea
-    color.g = 0.25;
-    color.b = 1.0;
-  } else if (debug > 1) {
-    // border
-    color.r = 1.0;
-    color.b = 0.5;
-  } else if (debug > 0) {
-    // ocean
-    color.b = 1.0;
+  float land = tex.x;
+  float mode = hex_param.y;
+  if (mode == 0.0) {
+    // coast
+    color = vec3(land);
+    if (debug == 3) {
+      // inland sea
+      color.g = 0.25;
+      color.b = 1.0;
+    } else if (debug == 2) {
+      // border
+      color.r = 1.0;
+      color.b = 0.5;
+    } else if (debug == 1) {
+      // ocean
+      color.rgb = vec3(0.0, 0.0, 1.0);
+    }
+  } else if (mode == 1.0) {
+    // terrain slope
+    color = vec3(tex.z);
+    if (land == 0.0) {
+      color = vec3(0.0, 0.0, 1.0);
+    }
+  } else if (mode == 2.0) {
+    // river slope
+    color = vec3(tex.w);
+    if (land == 0.0) {
+      color = vec3(0.0, 0.0, 1.0);
+    }
   }
   if (ix < 0.0 || ix >= hex_param.x || iy < 0.0 || iy >= hex_param.x) {
     alpha = 0.0;
   }
-  gl_FragColor = vec4(color, alpha);
+  gl_FragColor = vec4(color * interp_color.rgb, alpha);
 }

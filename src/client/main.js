@@ -66,17 +66,42 @@ export function main() {
   let debug_sprite;
   let opts = {
     seed: 1,
-    frequency: 2,
-    amplitude: 1,
-    persistence: 0.5,
-    lacunarity: { min: 1.6, max: 2.8, freq: 0.3 },
-    octaves: 6,
-    cutoff: 0.5,
-    domain_warp: 0,
-    warp_freq: 1,
-    warp_amp: 0.1,
-    fill_seas: true,
-    channels: true,
+    coast: {
+      key: '',
+      frequency: 2,
+      amplitude: 1,
+      persistence: 0.5,
+      lacunarity: { min: 1.6, max: 2.8, freq: 0.3 },
+      octaves: 6,
+      cutoff: 0.5,
+      domain_warp: 0,
+      warp_freq: 1,
+      warp_amp: 0.1,
+      fill_seas: true,
+      channels: true,
+    },
+    tslope: {
+      key: 'ts',
+      frequency: 3.5,
+      amplitude: 1,
+      persistence: 0.5,
+      lacunarity: 1.33,
+      octaves: 1,
+      domain_warp: 1,
+      warp_freq: 1,
+      warp_amp: 0.1,
+    },
+    rslope: {
+      key: 'rs',
+      frequency: 3.5,
+      amplitude: 1,
+      persistence: 0.5,
+      lacunarity: 1.33,
+      octaves: 1,
+      domain_warp: 1,
+      warp_freq: 1,
+      warp_amp: 0.1,
+    },
   };
   function updateDebugTexture() {
     let start = Date.now();
@@ -88,36 +113,43 @@ export function main() {
     let world_pos = vec2();
 
     let rand = randCreate(opts.seed);
-    let noise = new Array(opts.octaves);
-    for (let ii = 0; ii < noise.length; ++ii) {
-      noise[ii] = new SimplexNoise(`${opts.seed}n${ii}`);
-    }
-    let noise_warp = new Array(opts.domain_warp);
-    for (let ii = 0; ii < noise_warp.length; ++ii) {
-      noise_warp[ii] = new SimplexNoise(`${opts.seed}w${ii}`);
-    }
-    let noise_field = {};
-
-    let total_amplitude = 0;  // Used for normalizing result to 0.0 - 1.0
-    {
-      let amp = opts.amplitude;
-      let p = opts.persistence && opts.persistence.max || opts.persistence;
-      for (let ii=0; ii<opts.octaves; ii++) {
+    let noise;
+    let noise_warp;
+    let total_amplitude;
+    let noise_field;
+    let subopts;
+    function initNoise(subopts_in) {
+      subopts = subopts_in;
+      noise = new Array(subopts.octaves);
+      for (let ii = 0; ii < noise.length; ++ii) {
+        noise[ii] = new SimplexNoise(`${opts.seed}n${subopts.key}${ii}`);
+      }
+      noise_warp = new Array(subopts.domain_warp);
+      for (let ii = 0; ii < noise_warp.length; ++ii) {
+        noise_warp[ii] = new SimplexNoise(`${opts.seed}w${subopts.key}${ii}`);
+      }
+      total_amplitude = 0;  // Used for normalizing result to 0.0 - 1.0
+      let amp = subopts.amplitude;
+      let p = subopts.persistence && subopts.persistence.max || subopts.persistence;
+      for (let ii=0; ii<subopts.octaves; ii++) {
         total_amplitude += amp;
         amp *= p;
       }
-    }
-    let sample_pos = vec2();
-    for (let f in opts) {
-      let v = opts[f];
-      if (typeof v === 'object') {
-        noise_field[f] = new SimplexNoise(`${opts.seed}f${f}`);
-        v.mul = (v.max - v.min) * 0.5;
-        v.add = v.min + v.mul;
+      noise_field = {};
+      for (let f in subopts) {
+        let v = subopts[f];
+        if (typeof v === 'object') {
+          noise_field[f] = new SimplexNoise(`${opts.seed}f${subopts.key}${f}`);
+          v.mul = (v.max - v.min) * 0.5;
+          v.add = v.min + v.mul;
+        }
       }
     }
+
+    initNoise(opts.coast);
+    let sample_pos = vec2();
     function get(field) {
-      let v = opts[field];
+      let v = subopts[field];
       if (typeof v !== 'object') {
         return v;
       }
@@ -125,20 +157,20 @@ export function main() {
     }
     function sample() {
       v2copy(sample_pos, unif_pos);
-      let warp_freq = opts.warp_freq;
-      let warp_amp = opts.warp_amp;
-      for (let ii = 0; ii < opts.domain_warp; ++ii) {
+      let warp_freq = subopts.warp_freq;
+      let warp_amp = subopts.warp_amp;
+      for (let ii = 0; ii < subopts.domain_warp; ++ii) {
         let dx = noise_warp[ii].noise2D(sample_pos[0] * warp_freq, sample_pos[1] * warp_freq);
         let dy = noise_warp[ii].noise2D((sample_pos[0] + 7) * warp_freq, sample_pos[1] * warp_freq);
         sample_pos[0] += dx * warp_amp;
         sample_pos[1] += dy * warp_amp;
       }
       let total = 0;
-      let amp = opts.amplitude;
+      let amp = subopts.amplitude;
       let freq = get('frequency');
       let p = get('persistence');
       let lac = get('lacunarity');
-      for (let i=0; i<opts.octaves; i++) {
+      for (let i=0; i<subopts.octaves; i++) {
         total += (0.5 + 0.5 * noise[i].noise2D(sample_pos[0] * freq, sample_pos[1] * freq)) * amp;
         amp *= p;
         freq *= lac;
@@ -153,15 +185,18 @@ export function main() {
     for (let ii = 0; ii < 256; ++ii) {
       count_by_h[ii] = 0;
     }
+    function hexPosToUnifPos(ii, jj) {
+      world_pos[0] = ii * HEX_WIDTH;
+      world_pos[1] = jj * HEX_HEIGHT - HEX_HEIGHT * 0.5;
+      if (ii & 1) {
+        world_pos[1] += HEX_HEIGHT * 0.5;
+      }
+      unif_pos[0] = world_pos[0] / ((width - 1) * HEX_WIDTH) * 2.0 - 1.0;
+      unif_pos[1] = world_pos[1] / ((height - 1.5) * HEX_HEIGHT) * 2.0 - 1.0;
+    }
     for (let jj = 0; jj < height; ++jj) {
       for (let ii = 0; ii < width; ++ii) {
-        world_pos[0] = ii * HEX_WIDTH;
-        world_pos[1] = jj * HEX_HEIGHT - HEX_HEIGHT * 0.5;
-        if (ii & 1) {
-          world_pos[1] += HEX_HEIGHT * 0.5;
-        }
-        unif_pos[0] = world_pos[0] / ((width - 1) * HEX_WIDTH) * 2.0 - 1.0;
-        unif_pos[1] = world_pos[1] / ((height - 1.5) * HEX_HEIGHT) * 2.0 - 1.0;
+        hexPosToUnifPos(ii, jj);
 
         let h = sample(); // random()
         //let cutoff_scale = cutoff / 255; // scale cutoff to extend nearer to edge of maps
@@ -257,7 +292,7 @@ export function main() {
       inland_seas.forEach(function (sea) {
         // Channel to ocean if possible
         let is_ocean = false;
-        if (opts.channels) {
+        if (subopts.channels) {
           let checked = [];
           for (let ii = 0; ii < sea.length; ++ii) {
             checked[sea[ii]] = 1;
@@ -301,7 +336,7 @@ export function main() {
             }
           }
         }
-        if (!is_ocean && opts.fill_seas) {
+        if (!is_ocean && subopts.fill_seas) {
           for (let ii = 0; ii < sea.length; ++ii) {
             data[sea[ii] * BPP] = 255;
             data[sea[ii] * BPP + 1] = 0;
@@ -310,6 +345,34 @@ export function main() {
       });
     }
     fillSeas();
+
+    function generateTerrainSlope() {
+      initNoise(opts.tslope);
+      for (let jj = 0; jj < height; ++jj) {
+        for (let ii = 0; ii < width; ++ii) {
+          hexPosToUnifPos(ii, jj);
+
+          let h = sample(); // random()
+          h = clamp(floor(h * 255), 0.0, 255);
+          data[(jj * width + ii) * BPP + 2] = h;
+        }
+      }
+
+    }
+    generateTerrainSlope();
+    function generateRiverSlope() {
+      initNoise(opts.rslope);
+      for (let jj = 0; jj < height; ++jj) {
+        for (let ii = 0; ii < width; ++ii) {
+          hexPosToUnifPos(ii, jj);
+
+          let h = sample(); // random()
+          h = clamp(floor(h * 255), 0.0, 255);
+          data[(jj * width + ii) * BPP + 3] = h;
+        }
+      }
+    }
+    generateRiverSlope();
 
     if (!debug_texture) {
       debug_texture = textures.load({
@@ -333,6 +396,9 @@ export function main() {
     }
     console.log(`Debug texture update in ${(Date.now() - start)}ms`);
   }
+
+  let mode = 0;
+  hex_param[1] = mode;
 
   let need_regen = true;
   let debug_uvs = vec4(0,hex_tex_size + 1,hex_tex_size + 1,0);
@@ -383,23 +449,24 @@ export function main() {
     }
 
     let x0 = x;
+    let subopts;
     function slider(field, min_v, max_v, fixed, ex) {
       x = x0;
       let is_ex = false;
       if (ex) {
-        is_ex = typeof opts[field] === 'object';
+        is_ex = typeof subopts[field] === 'object';
         if (ui.buttonText({ x, y, text: is_ex ? 'v' : '-',
           w: ui.button_height })
         ) {
           is_ex = !is_ex;
           if (is_ex) {
-            opts[field] = {
-              min: opts[field],
-              max: opts[field],
+            subopts[field] = {
+              min: subopts[field],
+              max: subopts[field],
               freq: 1,
             };
           } else {
-            opts[field] = opts[field].max;
+            subopts[field] = subopts[field].max;
           }
           need_regen = true;
         }
@@ -408,34 +475,76 @@ export function main() {
       if (is_ex) {
         ui.print(style_labels, x, y, Z.UI, `${field}`);
         y += button_spacing;
-        opts[field].min = sliderInternal('min', opts[field].min, min_v, max_v, fixed);
-        opts[field].max = sliderInternal('max', opts[field].max, min_v, max_v, fixed);
-        opts[field].freq = sliderInternal('freq', opts[field].freq, 0.1, 2, 1);
+        subopts[field].min = sliderInternal('min', subopts[field].min, min_v, max_v, fixed);
+        subopts[field].max = sliderInternal('max', subopts[field].max, min_v, max_v, fixed);
+        subopts[field].freq = sliderInternal('freq', subopts[field].freq, 0.1, 2, 1);
       } else {
-        opts[field] = sliderInternal(field, opts[field], min_v, max_v, fixed);
+        subopts[field] = sliderInternal(field, subopts[field], min_v, max_v, fixed);
       }
     }
     function toggle(field) {
-      if (ui.buttonText({ x, y, text: `${field}: ${opts[field] ? 'ON': 'off'}` })) {
-        opts[field] = !opts[field];
+      if (ui.buttonText({ x, y, text: `${field}: ${subopts[field] ? 'ON': 'off'}` })) {
+        subopts[field] = !subopts[field];
         need_regen = true;
       }
       y += button_spacing;
     }
+    subopts = opts;
     slider('seed', 0, 100, 0);
-    slider('cutoff', 0.15, 1.0, 2);
-    slider('frequency', 0.1, 10, 1, true);
-    //slider('amplitude', 0.01, 10, 2);
-    slider('persistence', 0.01, 2, 2, true);
-    slider('lacunarity', 1, 10.0, 2, true);
-    slider('octaves', 1, 10, 0);
-    slider('domain_warp', 0, 2, 0);
-    if (opts.domain_warp) {
-      slider('warp_freq', 0.01, 3, 1);
-      slider('warp_amp', 0, 2, 2);
+
+    function modeButton(name, id) {
+      let w = ui.button_width / 2;
+      if (ui.buttonText({ x, y, w, text: `${mode === id ? 'O' : '-'} ${name}` })) {
+        hex_param[1] = mode = id;
+      }
+      x += w + 2;
     }
-    toggle('fill_seas');
-    toggle('channels');
+    modeButton('coast', 0);
+    modeButton('tslope', 1);
+    modeButton('rslope', 2);
+    x = x0;
+    y += button_spacing;
+
+    if (mode === 0) {
+      subopts = opts.coast;
+      slider('cutoff', 0.15, 1.0, 2);
+      slider('frequency', 0.1, 10, 1, true);
+      //slider('amplitude', 0.01, 10, 2);
+      slider('persistence', 0.01, 2, 2, true);
+      slider('lacunarity', 1, 10.0, 2, true);
+      slider('octaves', 1, 10, 0);
+      slider('domain_warp', 0, 2, 0);
+      if (subopts.domain_warp) {
+        slider('warp_freq', 0.01, 3, 1);
+        slider('warp_amp', 0, 2, 2);
+      }
+      toggle('fill_seas');
+      toggle('channels');
+    } else if (mode === 1) {
+      subopts = opts.tslope;
+      slider('frequency', 0.1, 10, 1, true);
+      //slider('amplitude', 0.01, 10, 2);
+      slider('persistence', 0.01, 2, 2, true);
+      slider('lacunarity', 1, 10.0, 2, true);
+      slider('octaves', 1, 10, 0);
+      slider('domain_warp', 0, 2, 0);
+      if (subopts.domain_warp) {
+        slider('warp_freq', 0.01, 3, 1);
+        slider('warp_amp', 0, 2, 2);
+      }
+    } else if (mode === 2) {
+      subopts = opts.rslope;
+      slider('frequency', 0.1, 10, 1, true);
+      //slider('amplitude', 0.01, 10, 2);
+      slider('persistence', 0.01, 2, 2, true);
+      slider('lacunarity', 1, 10.0, 2, true);
+      slider('octaves', 1, 10, 0);
+      slider('domain_warp', 0, 2, 0);
+      if (subopts.domain_warp) {
+        slider('warp_freq', 0.01, 3, 1);
+        slider('warp_amp', 0, 2, 2);
+      }
+    }
   }
 
   function testInit(dt) {
