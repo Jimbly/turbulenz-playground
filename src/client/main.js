@@ -108,6 +108,7 @@ export function main() {
     river: {
       weight_bend: 1,
       weight_fork: 1,
+      max_tslope: 300,
     },
   };
   let tex_total_size = hex_tex_size * hex_tex_size;
@@ -470,6 +471,22 @@ export function main() {
           ridx(active, idx);
           return ret;
         }
+        function validGrowth(frompos, topos) {
+          // Not too high relative to neighbors?
+          let new_elev = relev[frompos] + rslope[topos];
+          let x = topos % id_factor;
+          let neighbors = (x & 1) ? neighbors_odd : neighbors_even;
+          for (let ii = 0; ii < neighbors.length; ++ii) {
+            let npos = topos + neighbors[ii];
+            if (river[npos]) {
+              let d = new_elev - relev[npos];
+              if (d > opts.river.max_tslope) {
+                return false;
+              }
+            }
+          }
+          return true;
+        }
         while (next_elev <= max_elev) {
           let pos = chooseNode();
           if (pos === -1) {
@@ -481,8 +498,7 @@ export function main() {
           let neighbors = (x & 1) ? neighbors_odd : neighbors_even;
           let options = [];
           let cur_bits = river[pos];
-          cur_bits |= cur_bits << 6;
-          let bad_bits = cur_bits | cur_bits << 1 | cur_bits >> 1;
+          let bad_bits = cur_bits | cur_bits << 1 | cur_bits >> 1 | cur_bits >> 5 | cur_bits << 5;
           for (let ii = 0; ii < neighbors.length; ++ii) {
             if ((1 << ii) & bad_bits) {
               continue;
@@ -492,8 +508,9 @@ export function main() {
               continue;
             }
             // Technically valid
-            // TODO: check where this would put us on elevation re: neighbors
-            options.push([npos, ii]);
+            if (validGrowth(pos, npos)) {
+              options.push([npos, ii]);
+            }
           }
           if (!options.length) {
             // river is done, cannot expand
@@ -711,6 +728,10 @@ export function main() {
           y += ui.font_height;
           ui.print(style_labels, x, y, z, `RSlope: ${rslope[idx]}`);
           y += ui.font_height;
+          ui.print(style_labels, x, y, z, `RElev: ${relev[idx]}`);
+          y += ui.font_height;
+          ui.print(style_labels, x, y, z, `Strahler: ${rstrahler[idx]}`);
+          y += ui.font_height;
           let rbits = river[idx];
           ui.print(style_labels, x, y, z, `River: ${rbits&1?'Up':'  '} ${rbits&2?'UR':'  '} ` +
             `${rbits&4?'LR':'  '} ${rbits&8?'Dn':'  '} ${rbits&16?'LL':'  '} ${rbits&32?'UL':'  '}`);
@@ -866,6 +887,7 @@ export function main() {
       subopts = opts.river;
       slider('weight_bend', 1, 10, 0);
       slider('weight_fork', 1, 10, 0);
+      slider('max_tslope', 1, 1000, 0);
     }
   }
 
