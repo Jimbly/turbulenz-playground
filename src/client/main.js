@@ -64,6 +64,11 @@ export function main() {
   let hex_param = vec4(hex_tex_size, 0, 0, 0);
   shaders.addGlobal('hex_param', hex_param);
 
+  let modes = {
+    view: 3,
+    edit: 3,
+  };
+
   let debug_tex1;
   let debug_tex2;
   let debug_sprite;
@@ -112,6 +117,7 @@ export function main() {
       weight_sfork: 1,
       max_tslope: 48,
       tuning_h: 100,
+      show_elev: false,
     },
   };
   let tex_total_size = hex_tex_size * hex_tex_size;
@@ -713,7 +719,9 @@ export function main() {
       }
       computeStrahler();
     }
-    growRivers();
+    if (modes.view >= 3) {
+      growRivers();
+    }
 
     // interleave data
     for (let ii = 0; ii < tex_total_size; ++ii) {
@@ -722,7 +730,7 @@ export function main() {
       tex_data1[ii*4+2] = tslope[ii];
       tex_data1[ii*4+3] = rslope[ii];
       tex_data2[ii*4] = river[ii];
-      tex_data2[ii*4+1] = min(relev[ii]/opts.rslope.steps, 255);
+      tex_data2[ii*4+1] = opts.river.show_elev ? min(relev[ii]/opts.rslope.steps, 255) : 0;
       tex_data2[ii*4+2] = rstrahler[ii];
       tex_data2[ii*4+3] = 0;
     }
@@ -762,10 +770,6 @@ export function main() {
     console.log(`Debug texture update in ${(Date.now() - start)}ms`);
   }
 
-  let modes = {
-    view: 3,
-    edit: 3,
-  };
   hex_param[1] = modes.view;
   hex_param[2] = opts.rslope.steps;
 
@@ -957,6 +961,9 @@ export function main() {
       })) {
         modes[subkey] = id;
         hex_param[1] = modes.view;
+        if (subkey === 'view') {
+          need_regen = true;
+        }
       }
       x += w + 2;
     }
@@ -1024,6 +1031,7 @@ export function main() {
       slider('weight_sfork', 1, 10, 0);
       slider('max_tslope', 1, 200, 0);
       slider('tuning_h', 1, 200, 0);
+      toggle('show_elev');
     }
     hex_param[2] = opts.rslope.steps;
   }
