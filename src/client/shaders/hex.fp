@@ -112,12 +112,12 @@ void main(void) {
     }
   } else if (mode == 2.0) {
     // river slope
-    color = vec3(tex.w);
+    color = vec3(tex.w * 255.0 / hex_param.z);
     if (land == 0.0) {
       color = vec3(0.0, 0.0, 1.0);
     }
   } else if (mode == 3.0) {
-    // river slope
+    // rivers
     //color = vec3(tex.w);
     float relev = tex_extra.y;
     color = vec3(relev * 4.0);

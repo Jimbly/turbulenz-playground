@@ -6,7 +6,7 @@ const assert = require('assert');
 const camera2d = require('./glov/camera2d.js');
 const engine = require('./glov/engine.js');
 const input = require('./glov/input.js');
-const { max, min, floor, round, sqrt } = Math;
+const { abs, max, min, floor, round, sqrt } = Math;
 const net = require('./glov/net.js');
 const { randCreate } = require('./glov/rand_alea.js');
 const shaders = require('./glov/shaders.js');
@@ -96,7 +96,7 @@ export function main() {
     },
     rslope: {
       key: 'rs',
-      frequency: 10,
+      frequency: 1.2,
       amplitude: 1,
       persistence: 0.5,
       lacunarity: 1.33,
@@ -104,11 +104,14 @@ export function main() {
       domain_warp: 1,
       warp_freq: 1,
       warp_amp: 0.1,
+      steps: 4,
     },
     river: {
-      weight_bend: 1,
-      weight_fork: 1,
-      max_tslope: 300,
+      weight_bend: 2,
+      weight_afork: 2,
+      weight_sfork: 1,
+      max_tslope: 48,
+      tuning_h: 100,
     },
   };
   let tex_total_size = hex_tex_size * hex_tex_size;
@@ -121,8 +124,10 @@ export function main() {
   let rstrahler = new Uint8Array(tex_total_size);
   let tex_data1 = new Uint8Array(tex_total_size * 4);
   let tex_data2 = new Uint8Array(tex_total_size * 4);
+  let debug_priority = [];
 
   function updateDebugTexture() {
+    debug_priority = [];
     let start = Date.now();
     let width = hex_tex_size;
     let height = width;
@@ -401,8 +406,8 @@ export function main() {
           hexPosToUnifPos(ii, jj);
 
           let h = sample(); // random()
-          h = clamp(floor(h * 255), 0.0, 255);
-          rslope[jj * width + ii] = h;
+          h = clamp(floor(h * opts.rslope.steps), 0, opts.rslope.steps - 1);
+          rslope[jj * width + ii] = h + 1;
         }
       }
     }
@@ -456,20 +461,135 @@ export function main() {
         spreadSeas(D_SEA2);
       }
       findCandidates();
-      function grow() {
-        let active_by_elev = [];
-        let max_elev = 0;
-        let next_elev = 0;
-        active_by_elev[0] = coastlines.slice(0);
-        function chooseNode() {
-          let active = active_by_elev[next_elev];
-          if (!active || !active.length) {
-            return -1;
+      let orig_coastlines = coastlines;
+      function filterCoastalRivers() {
+        let rank = [[],[],[]];
+        coastlines.forEach(function (pos) {
+          let x = pos % id_factor;
+          let neighbors = (x & 1) ? neighbors_odd : neighbors_even;
+          let open_count = 0;
+          let open_bits = 0;
+          for (let ii = 0; ii < neighbors.length; ++ii) {
+            let npos = pos + neighbors[ii];
+            if (!land[npos]) {
+              open_bits |= 1 << ii;
+              ++open_count;
+            }
           }
-          let idx = rand.range(active.length);
-          let ret = active[idx];
-          ridx(active, idx);
-          return ret;
+          if (open_count >= 4) {
+            //river[pos] = 0;
+            return;
+          }
+          assert(open_count);
+          if (open_count === 1) {
+            // perfect
+            //river[pos] = 255;
+            rank[0].push(pos);
+            return;
+          }
+          // are all open tiles adjacent?
+          open_bits |= open_bits << 6;
+          let bpos = 0;
+          // Find something solid
+          while (open_bits & (1 << bpos)) {
+            bpos++;
+          }
+          // Find first open
+          while (!(open_bits & (1 << bpos))) {
+            bpos++;
+          }
+          let count = 0;
+          // count num contiguous open
+          while (open_bits & (1 << bpos)) {
+            bpos++;
+            ++count;
+          }
+          if (count !== open_count) {
+            //river[pos] = 10;
+            return;
+          }
+          let r = !rand.range(open_count === 2 ? 4 : 2);
+          if (r) {
+            rank[open_count - 1].push(pos);
+            //river[pos] = 200;
+          } else {
+            //river[pos] = 50;
+          }
+        });
+        let blocked = [];
+        coastlines = [];
+        for (let ii = 0; ii < rank.length; ++ii) {
+          let list = rank[ii];
+          for (let jj = 0; jj < list.length; ++jj) {
+            let pos = list[jj];
+            if (blocked[pos]) {
+              //river[pos] = 75;
+              continue;
+            }
+            coastlines.push(pos);
+            let x = pos % id_factor;
+            let neighbors = (x & 1) ? neighbors_odd : neighbors_even;
+            for (let kk = 0; kk < neighbors.length; ++kk) {
+              let npos = pos + neighbors[kk];
+              blocked[npos] = true;
+            }
+          }
+        }
+      }
+      filterCoastalRivers();
+      function grow() {
+        const MAX_PRIORITY = 10;
+        let weight_total = subopts.weight_bend + subopts.weight_sfork + subopts.weight_afork;
+        let active_by_prior = [];
+        let min_elev_by_prior = [];
+        let tuning_h = opts.river.tuning_h;
+        for (let ii = 0; ii <= MAX_PRIORITY; ++ii) {
+          active_by_prior[ii] = [[]];
+          min_elev_by_prior[ii] = 0;
+        }
+        for (let ii = 0; ii < coastlines.length; ++ii) {
+          let pos = coastlines[ii];
+          let p = rand.random();
+          p = 1 + floor(p*p*p * MAX_PRIORITY);
+          debug_priority[pos] = p;
+          let active_by_elev = active_by_prior[p];
+          active_by_elev[0].push(pos);
+        }
+        let chosen_priority;
+        function chooseNode() {
+          // find min elevation
+          let min_elev = Infinity;
+          for (let p = MAX_PRIORITY; p >= 0; --p) {
+            min_elev = min(min_elev, min_elev_by_prior[p]);
+          }
+          for (let p = MAX_PRIORITY; p >= 0; --p) {
+            let active_by_elev = active_by_prior[p];
+            for (let ii = 0; ii < tuning_h; ++ii) {
+              let elev = min_elev + ii;
+              let active = active_by_elev[elev];
+              if (active) {
+                let idx = rand.range(active.length);
+                let ret = active[idx];
+                ridx(active, idx);
+                if (!active.length) {
+                  // Nothing more at this (min) elevation at this priority
+                  delete active_by_elev[elev];
+                  let mep = min_elev_by_prior[p];
+                  assert.equal(mep, elev);
+                  while (!active_by_elev[mep] && mep < active_by_elev.length) {
+                    ++mep;
+                  }
+                  if (mep === active_by_elev.length) {
+                    mep = Infinity;
+                  }
+                  min_elev_by_prior[p] = mep;
+                }
+                chosen_priority = p;
+                return ret;
+              }
+            }
+          }
+          return -1;
         }
         function validGrowth(frompos, topos) {
           // Not too high relative to neighbors?
@@ -480,18 +600,17 @@ export function main() {
             let npos = topos + neighbors[ii];
             if (river[npos]) {
               let d = new_elev - relev[npos];
-              if (d > opts.river.max_tslope) {
+              if (abs(d) > opts.river.max_tslope) {
                 return false;
               }
             }
           }
           return true;
         }
-        while (next_elev <= max_elev) {
+        while (true) {
           let pos = chooseNode();
           if (pos === -1) {
-            ++next_elev;
-            continue;
+            break;
           }
           // Check all 6 neighbors, find any that are expandable
           let x = pos % id_factor;
@@ -516,10 +635,15 @@ export function main() {
             // river is done, cannot expand
             continue;
           }
+          let asym = false;
           if (options.length > 1) {
             let nopt = 1;
-            if (rand.range(subopts.weight_bend + subopts.weight_fork) >= subopts.weight_bend) {
+            let split = rand.range(weight_total);
+            if (split >= subopts.weight_bend) {
               nopt = 2;
+              if (split - subopts.weight_bend >= subopts.weight_sfork) {
+                asym = true;
+              }
             }
             for (let ii = 0; ii < nopt; ++ii) {
               let t = options[ii];
@@ -533,10 +657,16 @@ export function main() {
             let npos = options[ii][0];
             let ndir = options[ii][1];
             let nelev = relev[pos] + rslope[npos];
+            let p = asym ?
+              ii === 1 ? chosen_priority - 1 : chosen_priority :
+              options.length > 1 ? chosen_priority - 1 : chosen_priority;
+            p = max(0, p);
+            debug_priority[npos] = p;
             relev[npos] = nelev;
             river[npos] = 1 << ((ndir + 3) % 6);
             river[pos] |= 1 << ndir;
-            max_elev = max(max_elev, nelev);
+            min_elev_by_prior[p] = min(min_elev_by_prior[p], nelev);
+            let active_by_elev = active_by_prior[p];
             let active = active_by_elev[nelev];
             if (!active) {
               active = active_by_elev[nelev] = [];
@@ -577,8 +707,8 @@ export function main() {
           rstrahler[pos] = s;
           return s;
         }
-        for (let ii = 0; ii < coastlines.length; ++ii) {
-          fillStrahler(coastlines[ii], coastlines_incdir[ii]);
+        for (let ii = 0; ii < orig_coastlines.length; ++ii) {
+          fillStrahler(orig_coastlines[ii], coastlines_incdir[ii]);
         }
       }
       computeStrahler();
@@ -592,7 +722,7 @@ export function main() {
       tex_data1[ii*4+2] = tslope[ii];
       tex_data1[ii*4+3] = rslope[ii];
       tex_data2[ii*4] = river[ii];
-      tex_data2[ii*4+1] = min(relev[ii]/64, 255);
+      tex_data2[ii*4+1] = min(relev[ii]/opts.rslope.steps, 255);
       tex_data2[ii*4+2] = rstrahler[ii];
       tex_data2[ii*4+3] = 0;
     }
@@ -637,6 +767,7 @@ export function main() {
     edit: 3,
   };
   hex_param[1] = modes.view;
+  hex_param[2] = opts.rslope.steps;
 
   let need_regen = true;
   let debug_uvs = vec4(0,hex_tex_size + 1,hex_tex_size + 1,0);
@@ -729,6 +860,8 @@ export function main() {
           ui.print(style_labels, x, y, z, `RSlope: ${rslope[idx]}`);
           y += ui.font_height;
           ui.print(style_labels, x, y, z, `RElev: ${relev[idx]}`);
+          y += ui.font_height;
+          ui.print(style_labels, x, y, z, `RProir: ${debug_priority[idx]}`);
           y += ui.font_height;
           ui.print(style_labels, x, y, z, `Strahler: ${rstrahler[idx]}`);
           y += ui.font_height;
@@ -883,12 +1016,16 @@ export function main() {
         slider('warp_freq', 0.01, 3, 1);
         slider('warp_amp', 0, 2, 2);
       }
+      slider('steps', 1, 64, 0);
     } else if (modes.edit === 3) {
       subopts = opts.river;
       slider('weight_bend', 1, 10, 0);
-      slider('weight_fork', 1, 10, 0);
-      slider('max_tslope', 1, 1000, 0);
+      slider('weight_afork', 1, 10, 0);
+      slider('weight_sfork', 1, 10, 0);
+      slider('max_tslope', 1, 200, 0);
+      slider('tuning_h', 1, 200, 0);
     }
+    hex_param[2] = opts.rslope.steps;
   }
 
   function testInit(dt) {
