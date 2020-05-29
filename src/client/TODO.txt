@@ -1,12 +1,26 @@
-Place river mouths - on coast where two slope maps are lowest?
-  Maybe not?
+Next:
+  Need more sophisticated method of choosing which segment to grow next, use paper's method
+  Need height check on next node to make sure it's not invalid, right now bend = 10 causes lots of loops arounds
 
-Next: re-read paper's method of choosing how to expand
+
+Paper's method of choosing how to expand:
+  First: river nodes have an elevation, based on rslope map
+  Tuning factor H: we take the highest priority node within H of the lowest elevation candidate
+    Low H -> fill lowlands first
+    High H -> fewer, long, windy rivers?
+  Priority index is a simulated Strahler number - choose a value of 1-5 at the mouth, and each growth is either continuing straight, or a branch either symmetric or asymmetric.  Eventually all nodes are P=1, then priority is whichever was added first.  If a high P node cannot be expanded, re-evaluate the Strahler number of children.
+  Tuning factor: weight for straight vs sym branch vs asym branch
+    Do we have straight in ours?
+  When adding a new point, make sure the slope between it and neighboring points < a max_slope tuning factor
+    This will prevent rivers from turning back and filling in all of the space
+
+Blog's method:
+  Just random heightfield?
 
 For now: Ever coast cell is a potential source
   If someone expands over an unexplored one, that's fine, remove it from potential
   Use rslope to decide where river should expand
-Start a second texture, as well as a Uint16 array that we can use for river ordinality
+Start a second texture, as well as a Uint16? array that we can use for river ordinality
   After expanding rivers, everything should be a river, calculate the strahler number for each, and put that in a texture, draw that? Or, texture needs a direction in each hex and draw a line? Or, we prune rivers, so hexes either are or are not a river at this scale of map?
 
 Calculate drainage basins

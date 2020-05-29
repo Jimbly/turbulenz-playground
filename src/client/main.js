@@ -2,9 +2,11 @@
 const glov_local_storage = require('./glov/local_storage.js');
 glov_local_storage.storage_prefix = 'macrogen'; // Before requiring anything else that might load from this
 
+const assert = require('assert');
 const camera2d = require('./glov/camera2d.js');
 const engine = require('./glov/engine.js');
-const { min, floor, round, sqrt } = Math;
+const input = require('./glov/input.js');
+const { max, min, floor, round, sqrt } = Math;
 const net = require('./glov/net.js');
 const { randCreate } = require('./glov/rand_alea.js');
 const shaders = require('./glov/shaders.js');
@@ -12,9 +14,9 @@ const SimplexNoise = require('simplex-noise');
 const sprites = require('./glov/sprites.js');
 const textures = require('./glov/textures.js');
 const ui = require('./glov/ui.js');
-const { clamp } = require('../common/util.js');
+const { clamp, ridx } = require('../common/util.js');
 const {
-  vec2, v2copy, v2lengthSq,
+  vec2, v2copy, v2lengthSq, v2mul, v2sub,
   vec4,
 } = require('./glov/vmath.js');
 
@@ -58,22 +60,23 @@ export function main() {
 
   const createSprite = sprites.create;
 
-  let hex_tex_size = 256;
+  let hex_tex_size = 256; // 32
   let hex_param = vec4(hex_tex_size, 0, 0, 0);
   shaders.addGlobal('hex_param', hex_param);
 
-  let debug_texture;
+  let debug_tex1;
+  let debug_tex2;
   let debug_sprite;
   let opts = {
     seed: 1,
     coast: {
       key: '',
-      frequency: 2,
+      frequency: 2, // 0.1,
       amplitude: 1,
       persistence: 0.5,
       lacunarity: { min: 1.6, max: 2.8, freq: 0.3 },
       octaves: 6,
-      cutoff: 0.5,
+      cutoff: 0.5, // 0.22,
       domain_warp: 0,
       warp_freq: 1,
       warp_amp: 0.1,
@@ -93,7 +96,7 @@ export function main() {
     },
     rslope: {
       key: 'rs',
-      frequency: 3.5,
+      frequency: 10,
       amplitude: 1,
       persistence: 0.5,
       lacunarity: 1.33,
@@ -102,15 +105,30 @@ export function main() {
       warp_freq: 1,
       warp_amp: 0.1,
     },
+    river: {
+      weight_bend: 1,
+      weight_fork: 1,
+    },
   };
+  let tex_total_size = hex_tex_size * hex_tex_size;
+  let land = new Uint8Array(tex_total_size);
+  let fill = new Uint8Array(tex_total_size);
+  let tslope = new Uint8Array(tex_total_size);
+  let rslope = new Uint8Array(tex_total_size);
+  let river = new Uint16Array(tex_total_size);
+  let relev = new Uint32Array(tex_total_size);
+  let rstrahler = new Uint8Array(tex_total_size);
+  let tex_data1 = new Uint8Array(tex_total_size * 4);
+  let tex_data2 = new Uint8Array(tex_total_size * 4);
+
   function updateDebugTexture() {
     let start = Date.now();
     let width = hex_tex_size;
     let height = width;
-    let BPP = 4;
-    let data = new Uint8Array(width * height * BPP);
     let unif_pos = vec2();
     let world_pos = vec2();
+
+    fill.fill(0);
 
     let rand = randCreate(opts.seed);
     let noise;
@@ -178,6 +196,22 @@ export function main() {
       return total/total_amplitude;
     }
 
+    const D_OPEN = 0;
+    const D_BORDER = 1;
+    const D_SEA = 2;
+    const D_SEA2 = 3;
+    const D_INLAND_SEA = 4;
+    const D_COASTLINE = 5;
+
+    function shuffleArray(arr) {
+      for (let ii = arr.length - 1; ii >= 1; --ii) {
+        let swap = rand.range(ii + 1);
+        let t = arr[ii];
+        arr[ii] = arr[swap];
+        arr[swap] = t;
+      }
+    }
+
     const HEX_HEIGHT = 1.0; // distance between any two hexes = 1.0
     const HEX_EDGE = HEX_HEIGHT / sqrt(3);
     const HEX_WIDTH = 1.5 * HEX_EDGE;
@@ -194,8 +228,8 @@ export function main() {
       unif_pos[0] = world_pos[0] / ((width - 1) * HEX_WIDTH) * 2.0 - 1.0;
       unif_pos[1] = world_pos[1] / ((height - 1.5) * HEX_HEIGHT) * 2.0 - 1.0;
     }
-    for (let jj = 0; jj < height; ++jj) {
-      for (let ii = 0; ii < width; ++ii) {
+    for (let idx=0, jj = 0; jj < height; ++jj) {
+      for (let ii = 0; ii < width; ++ii, ++idx) {
         hexPosToUnifPos(ii, jj);
 
         let h = sample(); // random()
@@ -205,7 +239,7 @@ export function main() {
 
         h = clamp(floor(h * 255), 0.0, 255);
         count_by_h[h]++;
-        data[(jj * width + ii) * BPP] = h;
+        land[idx] = h;
       }
     }
     // Determine cutoff as a percentile
@@ -220,43 +254,50 @@ export function main() {
       cutoff_count -= count_by_h[cutoff];
     }
     for (let ii = 0; ii < total_size; ++ii) {
-      let h = data[ii * BPP];
-      data[ii * BPP] = h > cutoff ? 255 : 0;
+      let h = land[ii];
+      land[ii] = h > cutoff ? 255 : 0;
+      fill[ii] = D_OPEN;
     }
 
+    let id_factor = width;
+    let neighbors_even = [
+      id_factor, // above
+      1, // upper right
+      1 - id_factor, // lower right
+      -id_factor, // below
+      -1 - id_factor, // lower left
+      -1, // upper left
+    ];
+    let neighbors_odd = [
+      id_factor, // above
+      1 + id_factor, // upper right,
+      1, // lower right
+      -id_factor, // below
+      -1, // lower left
+      -1 + id_factor, // upper left,
+    ];
     function fillSeas() {
-      let id_factor = width;
       let todo = [];
       let done = [];
       function fillBorders() {
         for (let ii = 0; ii < width; ++ii) {
-          data[ii * BPP + 1] = 2;
-          data[((height - 1) * width + ii) * BPP + 1] = 2;
+          fill[ii] = D_BORDER;
+          fill[(height - 1) * width + ii] = D_BORDER;
         }
         for (let ii = 0; ii < height; ++ii) {
-          data[width * ii * BPP + 1] = 2;
-          data[(width * ii + width - 1) * BPP + 1] = 2;
+          fill[width * ii] = D_BORDER;
+          fill[width * ii + width - 1] = D_BORDER;
         }
       }
       fillBorders();
       function tryMark(pos, v) {
-        if (data[pos * BPP] || data[pos * BPP + 1]) {
+        if (land[pos] || fill[pos]) {
           return;
         }
-        data[pos * BPP + 1] = v;
+        fill[pos] = v;
         todo.push(pos);
         done.push(pos);
       }
-      let neighbors_even = [
-        -id_factor, id_factor, // above, below
-        -1, -1 - id_factor, // upper left, lower left
-        1, 1 - id_factor, // upper right, lower right
-      ];
-      let neighbors_odd = [
-        -id_factor, id_factor, // above, below
-        -1 + id_factor, -1,  // upper left, lower left
-        1 + id_factor, 1, // upper right, lower right
-      ];
       function spreadSeas(v) {
         while (todo.length) {
           let pos = todo.pop();
@@ -267,25 +308,17 @@ export function main() {
           }
         }
       }
-      tryMark(id_factor + 1, 1);
-      spreadSeas(1);
+      tryMark(id_factor + 1, D_SEA);
+      spreadSeas(D_SEA);
       // Find all inland seas, mark them, then grow them N steps to either find a channel or fill them
       let inland_seas = [];
-      for (let idx=0, pos = 0; pos < width * height; ++pos, idx += BPP) {
-        if (!data[idx] && !data[idx + 1]) {
+      for (let pos = 0; pos < width * height; ++pos) {
+        if (!land[pos] && !fill[pos]) {
           // open, and not an ocean or previously marked
           done = [];
-          tryMark(pos, 3);
-          spreadSeas(3);
+          tryMark(pos, D_INLAND_SEA);
+          spreadSeas(D_INLAND_SEA);
           inland_seas.push(done);
-        }
-      }
-      function shuffleArray(arr) {
-        for (let ii = arr.length - 1; ii >= 1; --ii) {
-          let swap = rand.range(ii + 1);
-          let t = arr[ii];
-          arr[ii] = arr[swap];
-          arr[swap] = t;
         }
       }
       shuffleArray(inland_seas);
@@ -321,14 +354,14 @@ export function main() {
             let neighbors = (x & 1) ? neighbors_odd : neighbors_even;
             for (let nidx = 0; nidx < neighbors.length; ++nidx) {
               let npos = pos + neighbors[nidx];
-              if (!checked[npos] && !data[npos * BPP] && data[npos * BPP + 1] === 1) {
+              if (!checked[npos] && !land[npos] && fill[npos] === D_SEA) {
                 // open route to the ocean!
-                data[pos*BPP] = 0;
+                land[pos] = 0;
                 sea.push(pos);
-                data[npos*BPP] = 0;
+                land[npos] = 0;
                 sea.push(npos);
                 for (let jj = 0; jj < sea.length; ++jj) {
-                  data[sea[jj]*BPP + 1] = 1;
+                  fill[sea[jj]] = D_SEA;
                 }
                 is_ocean = true;
                 break outer;
@@ -338,8 +371,8 @@ export function main() {
         }
         if (!is_ocean && subopts.fill_seas) {
           for (let ii = 0; ii < sea.length; ++ii) {
-            data[sea[ii] * BPP] = 255;
-            data[sea[ii] * BPP + 1] = 0;
+            land[sea[ii]] = 255;
+            fill[sea[ii]] = D_OPEN;
           }
         }
       });
@@ -354,7 +387,7 @@ export function main() {
 
           let h = sample(); // random()
           h = clamp(floor(h * 255), 0.0, 255);
-          data[(jj * width + ii) * BPP + 2] = h;
+          tslope[jj * width + ii] = h;
         }
       }
 
@@ -368,37 +401,225 @@ export function main() {
 
           let h = sample(); // random()
           h = clamp(floor(h * 255), 0.0, 255);
-          data[(jj * width + ii) * BPP + 3] = h;
+          rslope[jj * width + ii] = h;
         }
       }
     }
     generateRiverSlope();
 
-    if (!debug_texture) {
-      debug_texture = textures.load({
-        name: 'proc_gen_debug',
+    function growRivers() {
+      subopts = opts.river;
+      river.fill(0);
+      relev.fill(0);
+      let coastlines = [];
+      let coastlines_incdir = [];
+      function findCandidates() {
+        // PERF: this could be an output from the above steps - oceans and inland seas combined,
+        //   would just need better random choice for initial incoming direction
+        let todo = [];
+        function tryMark(pos, v, incoming_dir) {
+          let d = fill[pos];
+          if (d !== D_SEA) {
+            if (d === D_OPEN) { // land
+              fill[pos] = D_COASTLINE;
+              let invdir = (incoming_dir + 3) % 6;
+              river[pos] = 1 << invdir;
+              relev[pos] = 0;
+              coastlines.push(pos);
+              coastlines_incdir.push(invdir);
+            }
+            return;
+          }
+          fill[pos] = v;
+          todo.push(pos);
+        }
+        function spreadSeas(v) {
+          while (todo.length) {
+            let idx = rand.range(todo.length);
+            let pos = todo[idx];
+            ridx(todo, idx);
+            let x = pos % id_factor;
+            let neighbors = (x & 1) ? neighbors_odd : neighbors_even;
+            for (let ii = 0; ii < neighbors.length; ++ii) {
+              tryMark(pos + neighbors[ii], v, ii);
+            }
+          }
+        }
+        function tryMarkXY(x, y) {
+          tryMark(y * id_factor + x, D_SEA2);
+        }
+        tryMarkXY(1, 1);
+        tryMarkXY(width - 2, 1);
+        tryMarkXY(width - 2, height - 2);
+        tryMarkXY(1, height - 2);
+        spreadSeas(D_SEA2);
+      }
+      findCandidates();
+      function grow() {
+        let active_by_elev = [];
+        let max_elev = 0;
+        let next_elev = 0;
+        active_by_elev[0] = coastlines.slice(0);
+        function chooseNode() {
+          let active = active_by_elev[next_elev];
+          if (!active || !active.length) {
+            return -1;
+          }
+          let idx = rand.range(active.length);
+          let ret = active[idx];
+          ridx(active, idx);
+          return ret;
+        }
+        while (next_elev <= max_elev) {
+          let pos = chooseNode();
+          if (pos === -1) {
+            ++next_elev;
+            continue;
+          }
+          // Check all 6 neighbors, find any that are expandable
+          let x = pos % id_factor;
+          let neighbors = (x & 1) ? neighbors_odd : neighbors_even;
+          let options = [];
+          let cur_bits = river[pos];
+          cur_bits |= cur_bits << 6;
+          let bad_bits = cur_bits | cur_bits << 1 | cur_bits >> 1;
+          for (let ii = 0; ii < neighbors.length; ++ii) {
+            if ((1 << ii) & bad_bits) {
+              continue;
+            }
+            let npos = pos + neighbors[ii];
+            if (!land[npos] || river[npos]) {
+              continue;
+            }
+            // Technically valid
+            // TODO: check where this would put us on elevation re: neighbors
+            options.push([npos, ii]);
+          }
+          if (!options.length) {
+            // river is done, cannot expand
+            continue;
+          }
+          if (options.length > 1) {
+            let nopt = 1;
+            if (rand.range(subopts.weight_bend + subopts.weight_fork) >= subopts.weight_bend) {
+              nopt = 2;
+            }
+            for (let ii = 0; ii < nopt; ++ii) {
+              let t = options[ii];
+              let cidx = ii + rand.range(options.length - ii);
+              options[ii] = options[cidx];
+              options[cidx] = t;
+            }
+            options.length = nopt;
+          }
+          for (let ii = 0; ii < options.length; ++ii) {
+            let npos = options[ii][0];
+            let ndir = options[ii][1];
+            let nelev = relev[pos] + rslope[npos];
+            relev[npos] = nelev;
+            river[npos] = 1 << ((ndir + 3) % 6);
+            river[pos] |= 1 << ndir;
+            max_elev = max(max_elev, nelev);
+            let active = active_by_elev[nelev];
+            if (!active) {
+              active = active_by_elev[nelev] = [];
+            }
+            active.push(npos);
+          }
+        }
+      }
+      grow();
+      function computeStrahler() {
+        function fillStrahler(pos, from_dir) {
+          let bits = river[pos];
+          let out = [];
+          for (let ii = 0; ii < 6; ++ii) {
+            if (ii !== from_dir && (bits & (1 << ii))) {
+              out.push(ii);
+            }
+          }
+          let s;
+          if (!out.length) {
+            s = 1;
+          } else {
+            let x = pos % id_factor;
+            let neighbors = (x & 1) ? neighbors_odd : neighbors_even;
+            if (out.length === 1) {
+              s = fillStrahler(pos + neighbors[out[0]], (out[0] + 3) % 6);
+            } else {
+              assert.equal(out.length, 2);
+              let s1 = fillStrahler(pos + neighbors[out[0]], (out[0] + 3) % 6);
+              let s2 = fillStrahler(pos + neighbors[out[1]], (out[1] + 3) % 6);
+              if (s1 === s2) {
+                s = s1 + 1;
+              } else {
+                s = max(s1, s2);
+              }
+            }
+          }
+          rstrahler[pos] = s;
+          return s;
+        }
+        for (let ii = 0; ii < coastlines.length; ++ii) {
+          fillStrahler(coastlines[ii], coastlines_incdir[ii]);
+        }
+      }
+      computeStrahler();
+    }
+    growRivers();
+
+    // interleave data
+    for (let ii = 0; ii < tex_total_size; ++ii) {
+      tex_data1[ii*4] = land[ii];
+      tex_data1[ii*4+1] = fill[ii];
+      tex_data1[ii*4+2] = tslope[ii];
+      tex_data1[ii*4+3] = rslope[ii];
+      tex_data2[ii*4] = river[ii];
+      tex_data2[ii*4+1] = min(relev[ii]/64, 255);
+      tex_data2[ii*4+2] = rstrahler[ii];
+      tex_data2[ii*4+3] = 0;
+    }
+
+    if (!debug_tex1) {
+      debug_tex1 = textures.load({
+        name: 'proc_gen_debug1',
         format: textures.format.RGBA8,
         width,
         height,
-        data,
+        data: tex_data1,
+        filter_min: gl.NEAREST,
+        filter_mag: gl.NEAREST,
+        wrap_s: gl.CLAMP_TO_EDGE,
+        wrap_t: gl.CLAMP_TO_EDGE,
+      });
+      debug_tex2 = textures.load({
+        name: 'proc_gen_debug2',
+        format: textures.format.RGBA8,
+        width,
+        height,
+        data: tex_data2,
         filter_min: gl.NEAREST,
         filter_mag: gl.NEAREST,
         wrap_s: gl.CLAMP_TO_EDGE,
         wrap_t: gl.CLAMP_TO_EDGE,
       });
     } else {
-      debug_texture.updateData(width, height, data);
+      debug_tex1.updateData(width, height, tex_data1);
+      debug_tex2.updateData(width, height, tex_data2);
     }
     if (!debug_sprite) {
       debug_sprite = createSprite({
-        texs: [debug_texture],
+        texs: [debug_tex1, debug_tex2],
       });
     }
     console.log(`Debug texture update in ${(Date.now() - start)}ms`);
   }
 
-  let mode = 0;
-  hex_param[1] = mode;
+  let modes = {
+    view: 3,
+    edit: 3,
+  };
+  hex_param[1] = modes.view;
 
   let need_regen = true;
   let debug_uvs = vec4(0,hex_tex_size + 1,hex_tex_size + 1,0);
@@ -410,13 +631,93 @@ export function main() {
       updateDebugTexture();
     }
 
-    let debug_w = min(camera2d.w(), camera2d.h());
-    debug_sprite.draw({
-      x: camera2d.x1() - debug_w, y: camera2d.y0(),
-      w: debug_w, h: debug_w,
-      uvs: debug_uvs,
-      shader: shader_hex,
-    });
+    {
+      const HEX_ASPECT = 1.5 / sqrt(3);
+      let w = min(camera2d.w(), camera2d.h());
+      let x = camera2d.x1() - w * HEX_ASPECT;
+      let y = camera2d.y0();
+      debug_sprite.draw({
+        x, y, w, h: w,
+        z: Z.UI - 10,
+        uvs: debug_uvs,
+        shader: shader_hex,
+      });
+      let mouse_pos = input.mousePos();
+      if (mouse_pos[0] > x && mouse_pos[0] < x + w &&
+        mouse_pos[1] > y && mouse_pos[1] < y + w
+      ) {
+        // convert to texcoords
+        mouse_pos[0] = (mouse_pos[0] - x) / w * (hex_tex_size + 1);
+        mouse_pos[1] = (1 - (mouse_pos[1] - y) / w) * (hex_tex_size + 1);
+
+        // same in hex.fp
+        const HEX_HEIGHT = 1.0;
+        const VIEW_OFFS = vec2(0.5, 0.0);
+        const HEX_EDGE = HEX_HEIGHT / sqrt(3.0);
+        const HEX_EXTRA_WIDTH = 0.5 * HEX_EDGE; // cos(60/180*PI) * HEX_EDGE
+        const HEX_WIDTH = HEX_EDGE + HEX_EXTRA_WIDTH; // 1.5 * HEX_EDGE
+        const HEX_NON_EXTRA = HEX_EDGE / HEX_WIDTH; // 2/3rds
+        const HEX_HEIGHT_2 = HEX_HEIGHT / 2.0; // sin(60/180*PI) (0.85) * HEX_EDGE
+        const HEX_SLOPE = HEX_HEIGHT_2 / HEX_EXTRA_WIDTH;
+
+        let fpos = v2sub(vec2(), mouse_pos, VIEW_OFFS);
+        v2mul(fpos, fpos, vec2(1/HEX_WIDTH, 1/ HEX_HEIGHT));
+        let ix = floor(fpos[0]);
+        let odd = ix & 1;
+        if (odd) {
+          fpos[1] -= 0.5;
+        }
+        let fracx = fpos[0] - ix;
+        let iy = floor(fpos[1]);
+        if (fracx < HEX_NON_EXTRA) {
+          // in solid section
+        } else {
+          // in overlapping section
+          let run = ((fracx - HEX_NON_EXTRA) * HEX_WIDTH);
+          let fracy = fpos[1] - iy;
+          if (fracy > 0.5) {
+            // in top half
+            let slope = (1.0 - fracy) * HEX_HEIGHT / run;
+            if (slope < HEX_SLOPE) {
+              // in next over and up
+              ix++;
+              if (odd) {
+                iy++;
+              }
+            }
+          } else {
+            // in bottom half
+            let slope = (fracy * HEX_HEIGHT) / run;
+            if (slope < HEX_SLOPE) {
+              // in next over and down
+              ix++;
+              if (!odd) {
+                iy--;
+              }
+            }
+          }
+        }
+
+        if (ix >= 0 && ix < hex_tex_size && iy >= 0 && iy < hex_tex_size) {
+          let z = Z.UI - 5;
+          ui.print(style_labels, x, y, z, `${ix},${iy}`);
+          y += ui.font_height;
+          let idx = (iy * hex_tex_size + ix);
+          ui.print(style_labels, x, y, z, `Land: ${land[idx]}`);
+          y += ui.font_height;
+          ui.print(style_labels, x, y, z, `Flags: ${fill[idx]}`);
+          y += ui.font_height;
+          ui.print(style_labels, x, y, z, `TSlope: ${tslope[idx]}`);
+          y += ui.font_height;
+          ui.print(style_labels, x, y, z, `RSlope: ${rslope[idx]}`);
+          y += ui.font_height;
+          let rbits = river[idx];
+          ui.print(style_labels, x, y, z, `River: ${rbits&1?'Up':'  '} ${rbits&2?'UR':'  '} ` +
+            `${rbits&4?'LR':'  '} ${rbits&8?'Dn':'  '} ${rbits&16?'LL':'  '} ${rbits&32?'UL':'  '}`);
+          y += ui.font_height;
+        }
+      }
+    }
 
     let x = ui.button_height;
     let button_spacing = ui.button_height + 2;
@@ -440,7 +741,7 @@ export function main() {
       } else if (fixed === 2) {
         value = round(value * 100) / 100;
       }
-      ui.print(style_labels, x + ui.button_width + 4, y, Z.UI, `${field}: ${value.toFixed(fixed)}`);
+      ui.print(style_labels, x + ui.button_width + 4, y + 3, Z.UI, `${field}: ${value.toFixed(fixed)}`);
       y += button_spacing;
       if (old_value !== value) {
         need_regen = true;
@@ -473,7 +774,7 @@ export function main() {
         x += 16;
       }
       if (is_ex) {
-        ui.print(style_labels, x, y, Z.UI, `${field}`);
+        ui.print(style_labels, x, y + 3, Z.UI, `${field}`);
         y += button_spacing;
         subopts[field].min = sliderInternal('min', subopts[field].min, min_v, max_v, fixed);
         subopts[field].max = sliderInternal('max', subopts[field].max, min_v, max_v, fixed);
@@ -492,20 +793,37 @@ export function main() {
     subopts = opts;
     slider('seed', 0, 100, 0);
 
-    function modeButton(name, id) {
-      let w = ui.button_width / 2;
-      if (ui.buttonText({ x, y, w, text: `${mode === id ? 'O' : '-'} ${name}` })) {
-        hex_param[1] = mode = id;
+    function modeButton(subkey, name, id) {
+      let w = ui.button_width * 0.4;
+      let colors_selected = ui.makeColorSet(vec4(0,1,0,1));
+      let selected = modes[subkey] === id;
+      if (ui.buttonText({
+        x, y, w, text: `${name}`,
+        colors: selected ? colors_selected : null,
+      })) {
+        modes[subkey] = id;
+        hex_param[1] = modes.view;
       }
       x += w + 2;
     }
-    modeButton('coast', 0);
-    modeButton('tslope', 1);
-    modeButton('rslope', 2);
-    x = x0;
+    ui.print(style_labels, x, y + 2, Z.UI, 'View:');
+    x += 25;
+    modeButton('view', 'coast', 0);
+    //modeButton('view', 'tslope', 1);
+    modeButton('view', 'rslope', 2);
+    modeButton('view', 'river', 3);
     y += button_spacing;
+    x = x0;
+    ui.print(style_labels, x, y + 2, Z.UI, 'Edit:');
+    x += 25;
+    modeButton('edit', 'coast', 0);
+    //modeButton('edit', 'tslope', 1);
+    modeButton('edit', 'rslope', 2);
+    modeButton('edit', 'river', 3);
+    y += button_spacing;
+    x = x0;
 
-    if (mode === 0) {
+    if (modes.edit === 0) {
       subopts = opts.coast;
       slider('cutoff', 0.15, 1.0, 2);
       slider('frequency', 0.1, 10, 1, true);
@@ -520,7 +838,7 @@ export function main() {
       }
       toggle('fill_seas');
       toggle('channels');
-    } else if (mode === 1) {
+    } else if (modes.edit === 1) {
       subopts = opts.tslope;
       slider('frequency', 0.1, 10, 1, true);
       //slider('amplitude', 0.01, 10, 2);
@@ -532,7 +850,7 @@ export function main() {
         slider('warp_freq', 0.01, 3, 1);
         slider('warp_amp', 0, 2, 2);
       }
-    } else if (mode === 2) {
+    } else if (modes.edit === 2) {
       subopts = opts.rslope;
       slider('frequency', 0.1, 10, 1, true);
       //slider('amplitude', 0.01, 10, 2);
@@ -544,6 +862,10 @@ export function main() {
         slider('warp_freq', 0.01, 3, 1);
         slider('warp_amp', 0, 2, 2);
       }
+    } else if (modes.edit === 3) {
+      subopts = opts.river;
+      slider('weight_bend', 1, 10, 0);
+      slider('weight_fork', 1, 10, 0);
     }
   }
 
