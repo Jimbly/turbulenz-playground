@@ -467,6 +467,10 @@ export function main() {
         spreadSeas(D_SEA2);
       }
       findCandidates();
+      if (modes.view < 3) {
+        return;
+      }
+
       let orig_coastlines = coastlines;
       function filterCoastalRivers() {
         let rank = [[],[],[]];
@@ -719,9 +723,7 @@ export function main() {
       }
       computeStrahler();
     }
-    if (modes.view >= 3) {
-      growRivers();
-    }
+    growRivers();
 
     // interleave data
     for (let ii = 0; ii < tex_total_size; ++ii) {

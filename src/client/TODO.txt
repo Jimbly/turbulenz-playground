@@ -1,3 +1,8 @@
+Change tex height to be smaller so total represents a square area?
+  Would this make it difficult to map to a megagrid?
+  Better for previewing at least, though only slightly faster?
+  Later? Allow this to be otherwise rectangular, for varied continent generation?
+
 Tuning factor H: we take the highest priority node within H of the lowest elevation candidate
   Low H -> fill lowlands first
   High H -> fewer, long, windy rivers?
