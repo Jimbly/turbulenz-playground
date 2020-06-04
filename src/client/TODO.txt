@@ -7,10 +7,14 @@ Tuning factor H: we take the highest priority node within H of the lowest elevat
   Low H -> fill lowlands first
   High H -> fewer, long, windy rivers?
 
-Prune rivers and re-calc strahler numbers
+X Prune rivers and re-calc strahler numbers
+  Try: do not prune if a connected neighbor's strahler is > 1 (then do not need to re-calc, and provides more interesting shapes?)
 
-Calculate drainage basins / flag all cells as to which basin they grow out of
-Generate heightmap
+X Generate heightmap
+  Might be completely invalid, need to see it in 3D
+  Maybe need to calculate ridge lines between drainage basins and then work backwards?
+
+For better river basins - we need to adjust the rslope based on the strahler number, and flatten it out at the bottom
 
 Contintent tweaks:
 https://www.reddit.com/r/proceduralgeneration/comments/gi4hq4/geologically_reasonable_maps_seed_2/fqe9pt0/

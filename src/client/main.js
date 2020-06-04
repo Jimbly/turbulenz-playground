@@ -92,6 +92,8 @@ export function main() {
       key: 'ts',
       frequency: 3.5,
       amplitude: 1,
+      min: 0,
+      range: 8,
       persistence: 0.5,
       lacunarity: 1.33,
       octaves: 1,
@@ -116,18 +118,31 @@ export function main() {
       weight_afork: 2,
       weight_sfork: 1,
       max_tslope: 48,
-      tuning_h: 100,
-      show_elev: false,
+      tuning_h: 32,
+      show_elev: true,
+      prune: true,
+    },
+    ocean: {
+      frequency: 3,
+      amplitude: 1,
+      persistence: 0.5,
+      lacunarity: 2.4,
+      octaves: 3,
+      domain_warp: 1,
+      warp_freq: 1,
+      warp_amp: 1,
     },
   };
   let tex_total_size = hex_tex_size * hex_tex_size;
   let land = new Uint8Array(tex_total_size);
   let fill = new Uint8Array(tex_total_size);
+  let util = new Uint8Array(tex_total_size);
   let tslope = new Uint8Array(tex_total_size);
   let rslope = new Uint8Array(tex_total_size);
   let river = new Uint16Array(tex_total_size);
   let relev = new Uint32Array(tex_total_size);
   let rstrahler = new Uint8Array(tex_total_size);
+  let coast_distance = new Uint8Array(tex_total_size);
   let tex_data1 = new Uint8Array(tex_total_size * 4);
   let tex_data2 = new Uint8Array(tex_total_size * 4);
   let debug_priority = [];
@@ -244,7 +259,7 @@ export function main() {
       for (let ii = 0; ii < width; ++ii, ++idx) {
         hexPosToUnifPos(ii, jj);
 
-        let h = sample(); // random()
+        let h = sample();
         //let cutoff_scale = cutoff / 255; // scale cutoff to extend nearer to edge of maps
         //h *= cutoff_scale + (1 - cutoff_scale) * (1 - v2lengthSq(unif_pos));
         h *= 1 - v2lengthSq(unif_pos);
@@ -397,8 +412,10 @@ export function main() {
         for (let ii = 0; ii < width; ++ii) {
           hexPosToUnifPos(ii, jj);
 
-          let h = sample(); // random()
-          h = clamp(floor(h * 255), 0.0, 255);
+          let h = sample();
+          let min_v = get('min');
+          let range = get('range');
+          h = clamp(min_v + floor(h * range), 0.0, 255);
           tslope[jj * width + ii] = h;
         }
       }
@@ -411,7 +428,7 @@ export function main() {
         for (let ii = 0; ii < width; ++ii) {
           hexPosToUnifPos(ii, jj);
 
-          let h = sample(); // random()
+          let h = sample();
           h = clamp(floor(h * opts.rslope.steps), 0, opts.rslope.steps - 1);
           rslope[jj * width + ii] = h + 1;
         }
@@ -419,6 +436,7 @@ export function main() {
     }
     generateRiverSlope();
 
+    let border_min_dist = 0;
     function growRivers() {
       subopts = opts.river;
       river.fill(0);
@@ -467,6 +485,43 @@ export function main() {
         spreadSeas(D_SEA2);
       }
       findCandidates();
+
+      function generateDF() {
+        util.fill(0);
+        let todo = coastlines;
+        let d = 0;
+        for (let ii = 0; ii < todo.length; ++ii) {
+          let pos = todo[ii];
+          coast_distance[pos] = d;
+          util[pos] = 1;
+        }
+        while (todo.length) {
+          d = min(d + 1, 255);
+          let next = [];
+          for (let ii = 0; ii < todo.length; ++ii) {
+            let pos = todo[ii];
+            let x = pos % id_factor;
+            let neighbors = (x & 1) ? neighbors_odd : neighbors_even;
+            for (let jj = 0; jj < neighbors.length; ++jj) {
+              let npos = pos + neighbors[jj];
+              if (!util[npos]) {
+                util[npos] = 1;
+                coast_distance[npos] = d;
+                if (fill[npos] === D_BORDER) {
+                  if (!border_min_dist) {
+                    border_min_dist = d;
+                  }
+                } else {
+                  next.push(npos);
+                }
+              }
+            }
+          }
+          todo = next;
+        }
+      }
+      generateDF();
+
       if (modes.view < 3) {
         return;
       }
@@ -722,19 +777,106 @@ export function main() {
         }
       }
       computeStrahler();
+      function pruneRivers() {
+        for (let pos = 0; pos < total_size; ++pos) {
+          if (rstrahler[pos] === 1) {
+            let bits = river[pos];
+            river[pos] = 0;
+            rstrahler[pos] = 0;
+            relev[pos] = 0;
+            let x = pos % id_factor;
+            let neighbors = (x & 1) ? neighbors_odd : neighbors_even;
+            for (let ii = 0; ii < 6; ++ii) {
+              if (bits & (1 << ii)) {
+                let npos = pos + neighbors[ii];
+                river[npos] &= ~(1 << ((ii + 3) % 6));
+              }
+            }
+          }
+        }
+      }
+      if (subopts.prune) {
+        pruneRivers();
+        computeStrahler();
+      }
+      function buildUpHeight() {
+        util.fill(0);
+        // Accumulate river nodes
+        // Maybe also start with coastlines?
+        let work_nodes = [];
+        for (let pos = 0; pos < total_size; ++pos) {
+          if (river[pos]) {
+            work_nodes.push(pos);
+          }
+        }
+        // Contribute from work nodes to all land neighbors
+        while (work_nodes.length) {
+          let next_nodes = [];
+          for (let ii = 0; ii < work_nodes.length; ++ii) {
+            let pos = work_nodes[ii];
+            let x = pos % id_factor;
+            let neighbors = (x & 1) ? neighbors_odd : neighbors_even;
+            let nheight = relev[pos] + tslope[pos];
+            for (let jj = 0; jj < neighbors.length; ++jj) {
+              let npos = pos + neighbors[jj];
+              if (!river[npos] && land[npos] && util[npos] !== 255) {
+                if (!util[npos]) {
+                  relev[npos] = 0;
+                  next_nodes.push(npos);
+                }
+                relev[npos]+=nheight;
+                util[npos]++;
+              }
+            }
+          }
+          // average
+          for (let ii = 0; ii < next_nodes.length; ++ii) {
+            let pos = next_nodes[ii];
+            relev[pos] /= util[pos];
+            util[pos] = 255;
+          }
+          work_nodes = next_nodes;
+        }
+      }
+      buildUpHeight();
     }
     growRivers();
 
+    function generateOcean() {
+      initNoise(opts.ocean);
+      for (let jj = 0; jj < height; ++jj) {
+        for (let ii = 0; ii < width; ++ii) {
+          let pos = jj * width + ii;
+          if (!land[pos]) {
+            hexPosToUnifPos(ii, jj);
+
+            let noise_v = sample();
+            let distance = clamp(coast_distance[pos] / border_min_dist, 0, 1);
+            let noise_weight = (0.5 - abs(distance - 0.5));
+            distance -= noise_v * noise_weight;
+            relev[pos] = clamp(distance * 255, 0, 255);
+          }
+        }
+      }
+
+    }
+    generateOcean();
+
     // interleave data
+    let tslope_min = typeof opts.tslope.min === 'object' ? opts.tslope.min.add + opts.tslope.min.mul : opts.tslope.min;
+    let tslope_range = typeof opts.tslope.range === 'object' ?
+      opts.tslope.range.add + opts.tslope.range.mul :
+      opts.tslope.range;
+    let tslope_mul = 255 / (tslope_min + tslope_range);
     for (let ii = 0; ii < tex_total_size; ++ii) {
       tex_data1[ii*4] = land[ii];
       tex_data1[ii*4+1] = fill[ii];
-      tex_data1[ii*4+2] = tslope[ii];
+      tex_data1[ii*4+2] = clamp(tslope[ii] * tslope_mul, 0, 255);
       tex_data1[ii*4+3] = rslope[ii];
       tex_data2[ii*4] = river[ii];
-      tex_data2[ii*4+1] = opts.river.show_elev ? min(relev[ii]/opts.rslope.steps, 255) : 0;
+      tex_data2[ii*4+1] = land[ii] ? opts.river.show_elev ? min(relev[ii]/opts.rslope.steps, 255) : 0 : relev[ii];
       tex_data2[ii*4+2] = rstrahler[ii];
-      tex_data2[ii*4+3] = 0;
+      tex_data2[ii*4+3] = coast_distance[ii];
     }
 
     if (!debug_tex1) {
@@ -954,7 +1096,7 @@ export function main() {
     slider('seed', 0, 100, 0);
 
     function modeButton(subkey, name, id) {
-      let w = ui.button_width * 0.4;
+      let w = ui.button_width * 0.38;
       let colors_selected = ui.makeColorSet(vec4(0,1,0,1));
       let selected = modes[subkey] === id;
       if (ui.buttonText({
@@ -972,7 +1114,7 @@ export function main() {
     ui.print(style_labels, x, y + 2, Z.UI, 'View:');
     x += 25;
     modeButton('view', 'coast', 0);
-    //modeButton('view', 'tslope', 1);
+    modeButton('view', 'tslope', 1);
     modeButton('view', 'rslope', 2);
     modeButton('view', 'river', 3);
     y += button_spacing;
@@ -980,9 +1122,10 @@ export function main() {
     ui.print(style_labels, x, y + 2, Z.UI, 'Edit:');
     x += 25;
     modeButton('edit', 'coast', 0);
-    //modeButton('edit', 'tslope', 1);
+    modeButton('edit', 'tslope', 1);
     modeButton('edit', 'rslope', 2);
     modeButton('edit', 'river', 3);
+    modeButton('edit', 'ocean', 4);
     y += button_spacing;
     x = x0;
 
@@ -1005,6 +1148,8 @@ export function main() {
       subopts = opts.tslope;
       slider('frequency', 0.1, 10, 1, true);
       //slider('amplitude', 0.01, 10, 2);
+      slider('min', 0, 10, 0, true);
+      slider('range', 0, 255, 0, true);
       slider('persistence', 0.01, 2, 2, true);
       slider('lacunarity', 1, 10.0, 2, true);
       slider('octaves', 1, 10, 0);
@@ -1034,6 +1179,18 @@ export function main() {
       slider('max_tslope', 1, 200, 0);
       slider('tuning_h', 1, 200, 0);
       toggle('show_elev');
+      toggle('prune');
+    } else if (modes.edit === 4) {
+      subopts = opts.ocean;
+      slider('frequency', 0.1, 10, 1, true);
+      slider('persistence', 0.01, 2, 2, true);
+      slider('lacunarity', 1, 10.0, 2, true);
+      slider('octaves', 1, 10, 0);
+      slider('domain_warp', 0, 2, 0);
+      if (subopts.domain_warp) {
+        slider('warp_freq', 0.01, 3, 1);
+        slider('warp_amp', 0, 2, 2);
+      }
     }
     hex_param[2] = opts.rslope.steps;
   }
