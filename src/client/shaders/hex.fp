@@ -108,19 +108,19 @@ void main(void) {
     // terrain slope
     color = vec3(tex.z);
     if (land == 0.0) {
-      color = vec3(0.0, 0.0, 1.0 - tex_extra.y);
+      color = vec3(0.0, 0.0, tex_extra.y);
     }
   } else if (mode == 2.0) {
     // river slope
     color = vec3(tex.w * 255.0 / hex_param.z);
     if (land == 0.0) {
-      color = vec3(0.0, 0.0, 1.0 - tex_extra.y);
+      color = vec3(0.0, 0.0, tex_extra.y);
     }
   } else if (mode == 3.0) {
     // rivers
     //color = vec3(tex.w);
     float relev = tex_extra.y;
-    color = vec3(relev * 4.0);
+    color = vec3(relev);
 
     //color *= color;
     vec4 bits1;
@@ -162,13 +162,13 @@ void main(void) {
       color.rgb = vec3(0.0, 0.0, strahler * 48.0);
     }
     if (land == 0.0) {
-      color = vec3(0.0, 0.0, 1.0 - tex_extra.y);
+      color = vec3(0.0, 0.0, tex_extra.y);
     }
   } else if (mode == 4.0) {
     if (land == 1.0) {
       color = tex_extra.www;
     } else {
-      color = vec3(0.0, 0.0, 1.0 - tex_extra.y);
+      color = vec3(0.0, 0.0, tex_extra.y);
     }
   }
   if (ix < 0.0 || ix >= hex_param.x || iy < 0.0 || iy >= hex_param.x) {

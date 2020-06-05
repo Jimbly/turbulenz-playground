@@ -65,8 +65,8 @@ export function main() {
   shaders.addGlobal('hex_param', hex_param);
 
   let modes = {
-    view: 4,
-    edit: 4,
+    view: 3,
+    edit: 3,
   };
 
   let debug_tex1;
@@ -142,6 +142,13 @@ export function main() {
       warp_freq: 1,
       warp_amp: 1,
       rainshadow: 0.5,
+      show_relief: false,
+    },
+    output: {
+      sea_range_exp: 14,
+      land_range_exp: 14,
+      sea_range: 1 << 14,
+      land_range: 1 << 14,
     },
   };
   let tex_total_size = hex_tex_size * hex_tex_size;
@@ -873,6 +880,31 @@ export function main() {
     }
     generateOcean();
 
+    function generateOutput() {
+      let max_depth = 0;
+      let max_height = 0;
+      for (let pos = 0; pos < total_size; ++pos) {
+        let e = relev[pos];
+        if (land[pos]) {
+          max_height = max(max_height, e);
+        } else {
+          max_depth = max(max_depth, e);
+        }
+      }
+      for (let pos = 0; pos < total_size; ++pos) {
+        let e = relev[pos];
+        if (land[pos]) {
+          e = opts.output.sea_range + (e / max_height) * opts.output.land_range;
+        } else {
+          e = opts.output.sea_range - 1 - (e / max_depth) * opts.output.sea_range;
+        }
+        relev[pos] = max(0, round(e));
+      }
+    }
+    generateOutput();
+
+    let total_range = opts.output.land_range; // + opts.output.sea_range; - sea isn't used for slope, for the most part
+    let slope_mul = 1024 / total_range;
     function generateHumidity() {
       function generateSlope() {
         for (let y = 0; y < height; ++y) {
@@ -890,16 +922,13 @@ export function main() {
                 }
                 let npos = pos + neighbors[ii];
                 let nelev = relev[npos];
-                if (!land[npos]) {
-                  nelev *= -0.001;
-                }
                 if (ii < 3) {
                   right_slope += elev - nelev;
                 } else {
                   right_slope += nelev - elev;
                 }
               }
-              humidity[pos] = clamp(128 + 127 * right_slope / 20, 0, 255);
+              humidity[pos] = clamp(128 + right_slope * slope_mul, 0, 255);
             } else {
               humidity[pos] = 128;
             }
@@ -907,6 +936,9 @@ export function main() {
         }
       }
       generateSlope();
+      if (opts.humidity.show_relief) {
+        return;
+      }
       function blurSlope() {
         for (let y = 0; y < height; ++y) {
           for (let x = 0; x < width; ++x) {
@@ -962,7 +994,11 @@ export function main() {
       tex_data1[ii*4+2] = clamp(tslope[ii] * tslope_mul, 0, 255);
       tex_data1[ii*4+3] = rslope[ii];
       tex_data2[ii*4] = river[ii];
-      tex_data2[ii*4+1] = land[ii] ? opts.river.show_elev ? min(relev[ii]/opts.rslope.steps, 255) : 0 : relev[ii];
+      tex_data2[ii*4+1] = (land[ii] ?
+        opts.river.show_elev ?
+          (relev[ii] - opts.output.sea_range) / opts.output.land_range :
+          0 :
+        relev[ii] / opts.output.sea_range) * 255;
       tex_data2[ii*4+2] = rstrahler[ii];
       tex_data2[ii*4+3] = humidity[ii];
     }
@@ -1218,8 +1254,11 @@ export function main() {
     modeButton('edit', 'tslope', 1);
     modeButton('edit', 'rslope', 2);
     modeButton('edit', 'river', 3);
+    y += button_spacing;
+    x = x0 + 25;
     modeButton('edit', 'humid', 4);
     modeButton('edit', 'ocean', 5);
+    modeButton('edit', 'output', 6);
     y += button_spacing;
     x = x0;
 
@@ -1286,6 +1325,7 @@ export function main() {
         slider('warp_amp', 0, 2, 2);
       }
       slider('rainshadow', 0, 1, 2, true);
+      toggle('show_relief');
     } else if (modes.edit === 5) {
       subopts = opts.ocean;
       slider('frequency', 0.1, 10, 1, true);
@@ -1297,6 +1337,12 @@ export function main() {
         slider('warp_freq', 0.01, 3, 1);
         slider('warp_amp', 0, 2, 2);
       }
+    } else if (modes.edit === 6) {
+      subopts = opts.output;
+      slider('sea_range_exp', 6, 15, 0);
+      slider('land_range_exp', 6, 15, 0);
+      subopts.sea_range = 1 << subopts.sea_range_exp;
+      subopts.land_range = 1 << subopts.land_range_exp;
     }
     hex_param[2] = opts.rslope.steps;
   }
