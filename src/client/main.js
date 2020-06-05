@@ -986,7 +986,10 @@ export function main() {
         }
       }
     }
-    mergeStrahlerIntoRiver();
+    if (0) {
+      // Don't do this, save these 2 bits for Rosgen classification or something
+      mergeStrahlerIntoRiver();
+    }
 
     // interleave data
     let tslope_min = typeof opts.tslope.min === 'object' ? opts.tslope.min.add + opts.tslope.min.mul : opts.tslope.min;
@@ -1141,7 +1144,7 @@ export function main() {
           y += ui.font_height;
           ui.print(style_labels, x, y, z, `RProir: ${debug_priority[idx]}`);
           y += ui.font_height;
-          ui.print(style_labels, x, y, z, `Strahler: ${rstrahler[idx]} (${river[idx] ? (river[idx] >> 6) + 1 : 0})`);
+          ui.print(style_labels, x, y, z, `Strahler: ${rstrahler[idx]}`);
           y += ui.font_height;
           ui.print(style_labels, x, y, z, `Humidity: ${humidity[idx]}`);
           y += ui.font_height;

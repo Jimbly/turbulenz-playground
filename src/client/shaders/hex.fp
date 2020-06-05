@@ -136,7 +136,7 @@ void main(void) {
     bits1 = floor(fract(bits1) * 2.0);
     bits2 = floor(fract(bits2) * vec3(2.0, 2.0, 4.0));
 
-    float strahler = 1.0 + bits2.z; // tex_extra.z * 255.0;
+    float strahler = tex_extra.z * 255.0;
 
     fracx = fracx * 0.75 + 0.25;
     float r = 0.0;
