@@ -1,9 +1,13 @@
+Get a picture of current biome distribution out at this same scale (256x256 hexomes)
+
+
 Next steps:
-  Add getBiomeType() preview here and see what biomes get generated where
-    Based on: tslope, elev, humidity?  Ignore elev for now? some scale slope by elev (but, want mountainous coasts)?
   Export image into game and generate just height (flat biome) for whole world, see what it feels like (just LODs?)
     Also add rivers?
 
+
+Getting way too much contiguous mountain, yet not enough smaller mountain ranges
+  Output is pretty good with 128hx maps, scale mountain_cutoff by 1.5, is_cliff by 2
 
 Change tex height to be smaller so total represents a square area?
   Would this make it difficult to map to a megagrid?

@@ -4,6 +4,7 @@ precision lowp float;
 
 uniform sampler2D tex0;
 uniform sampler2D tex1;
+uniform sampler2D tex2;
 
 uniform vec4 hex_param;
 
@@ -79,6 +80,7 @@ void main(void) {
 
   vec4 tex = texture2D(tex0, texcoords);
   vec4 tex_extra = texture2D(tex1, texcoords);
+  vec4 tex_color = texture2D(tex2, texcoords);
   vec3 color = vec3(1.0, 0.0, 1.0);
   float alpha = interp_color.a;
   int debug = int(tex.y * 255.0 + 0.1);
@@ -120,7 +122,11 @@ void main(void) {
     // rivers
     //color = vec3(tex.w);
     float relev = tex_extra.y;
-    color = vec3(relev);
+    if (mode == 5.0) {
+      color = tex_color.rgb;
+    } else {
+      color = vec3(relev);
+    }
 
     //color *= color;
     vec4 bits1;
@@ -170,6 +176,11 @@ void main(void) {
       color = tex_extra.www;
     } else {
       color = vec3(0.0, 0.0, tex_extra.y);
+    }
+  } else if (mode == 5.0) {
+    color = tex_color.rgb;
+    if (land == 0.0) {
+      color.b = 1.0;
     }
   }
   if (ix < 0.0 || ix >= hex_param.x || iy < 0.0 || iy >= hex_param.x) {

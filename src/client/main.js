@@ -3,6 +3,7 @@ const glov_local_storage = require('./glov/local_storage.js');
 glov_local_storage.storage_prefix = 'macrogen'; // Before requiring anything else that might load from this
 
 const assert = require('assert');
+const { getBiomeV2 } = require('./biome_test.js');
 const camera2d = require('./glov/camera2d.js');
 const engine = require('./glov/engine.js');
 const input = require('./glov/input.js');
@@ -60,17 +61,18 @@ export function main() {
 
   const createSprite = sprites.create;
 
-  let hex_tex_size = 256; // 32
+  let hex_tex_size = 256;
   let hex_param = vec4(hex_tex_size, 0, 0, 0);
   shaders.addGlobal('hex_param', hex_param);
 
   let modes = {
-    view: 3,
+    view: 5,
     edit: 3,
   };
 
   let debug_tex1;
   let debug_tex2;
+  let debug_tex3;
   let debug_sprite;
   let opts = {
     seed: 1,
@@ -141,7 +143,7 @@ export function main() {
       domain_warp: 0,
       warp_freq: 1,
       warp_amp: 1,
-      rainshadow: 0.5,
+      rainshadow: 0.4,
       show_relief: false,
     },
     output: {
@@ -164,6 +166,7 @@ export function main() {
   let humidity = new Uint8Array(tex_total_size);
   let tex_data1 = new Uint8Array(tex_total_size * 4);
   let tex_data2 = new Uint8Array(tex_total_size * 4);
+  let tex_data_color = new Uint8Array(tex_total_size * 4);
   let debug_priority = [];
 
   function updateDebugTexture() {
@@ -987,20 +990,70 @@ export function main() {
       }
     }
     if (0) {
-      // Don't do this, save these 2 bits for Rosgen classification or something
+      // Don't do this, save these 2 bits for Rosgen classification or lakes or something
       mergeStrahlerIntoRiver();
     }
 
+    function scaleTSlope() {
+      let tslope_min = typeof opts.tslope.min === 'object' ? opts.tslope.min.add + opts.tslope.min.mul :opts.tslope.min;
+      let tslope_range = typeof opts.tslope.range === 'object' ?
+        opts.tslope.range.add + opts.tslope.range.mul :
+        opts.tslope.range;
+      let tslope_mul = 255 / (tslope_min + tslope_range);
+      for (let ii = 0; ii < total_size; ++ii) {
+        tslope[ii] = clamp(tslope[ii] * tslope_mul, 0, 255);
+      }
+    }
+    scaleTSlope();
+
+    function calculateBiomesTest() {
+      // This will not be in output, just simulating what the game will do with this data when it gets it
+
+      for (let y = 0; y < height; ++y) {
+        for (let x = 0; x < width; ++x) {
+          let pos = y * width + x;
+          let is_land = land[pos];
+          let elev = (relev[pos] - opts.output.sea_range) / opts.output.land_range;
+          // let has_river = is_land && river[pos];
+          let humid = humidity[pos] / 255;
+          // let slope = tslope[pos]; // Use actual calculated abs(max?) of slope from elev?
+          let cdist = coast_distance[pos] / (hex_tex_size * 2);
+          let choice = rand.random();
+
+          // calc actual slope
+          let tot_slope = 0;
+          //let max_slope = 0;
+          let neighbors = (x & 1) ? neighbors_odd : neighbors_even;
+          for (let ii = 0; ii < 6; ++ii) {
+            let npos = pos + neighbors[ii];
+            let nelev = (relev[npos] - opts.output.sea_range) / opts.output.land_range;
+            let slope = abs(elev - nelev);
+            tot_slope += slope;
+            //max_slope = max(max_slope, slope);
+          }
+          //let is_cliff = tot_slope > 0.6;
+          //let is_cliff = max_slope > 0.2;
+          // Slope seems not numerically useful for biome choice, but avg_slope
+          //  over a threshold seems useful for an "is cliffs" flag
+
+          let color = getBiomeV2(is_land, tot_slope, elev, humid, choice, cdist);
+
+          //let color = getBiomeV1(is_land, elev, humid, choice);
+          for (let jj = 0; jj < 4; ++jj) {
+            tex_data_color[pos * 4 + jj] = color[jj];
+          }
+        }
+      }
+    }
+    if (modes.view === 5) {
+      calculateBiomesTest();
+    }
+
     // interleave data
-    let tslope_min = typeof opts.tslope.min === 'object' ? opts.tslope.min.add + opts.tslope.min.mul : opts.tslope.min;
-    let tslope_range = typeof opts.tslope.range === 'object' ?
-      opts.tslope.range.add + opts.tslope.range.mul :
-      opts.tslope.range;
-    let tslope_mul = 255 / (tslope_min + tslope_range);
     for (let ii = 0; ii < tex_total_size; ++ii) {
       tex_data1[ii*4] = land[ii];
       tex_data1[ii*4+1] = fill[ii];
-      tex_data1[ii*4+2] = clamp(tslope[ii] * tslope_mul, 0, 255);
+      tex_data1[ii*4+2] = tslope[ii];
       tex_data1[ii*4+3] = rslope[ii];
       tex_data2[ii*4] = river[ii];
       tex_data2[ii*4+1] = (land[ii] ?
@@ -1035,13 +1088,25 @@ export function main() {
         wrap_s: gl.CLAMP_TO_EDGE,
         wrap_t: gl.CLAMP_TO_EDGE,
       });
+      debug_tex3 = textures.load({
+        name: 'proc_gen_debug3',
+        format: textures.format.RGBA8,
+        width,
+        height,
+        data: tex_data_color,
+        filter_min: gl.NEAREST,
+        filter_mag: gl.NEAREST,
+        wrap_s: gl.CLAMP_TO_EDGE,
+        wrap_t: gl.CLAMP_TO_EDGE,
+      });
     } else {
       debug_tex1.updateData(width, height, tex_data1);
       debug_tex2.updateData(width, height, tex_data2);
+      debug_tex3.updateData(width, height, tex_data_color);
     }
     if (!debug_sprite) {
       debug_sprite = createSprite({
-        texs: [debug_tex1, debug_tex2],
+        texs: [debug_tex1, debug_tex2, debug_tex3],
       });
     }
     console.log(`Debug texture update in ${(Date.now() - start)}ms`);
@@ -1254,7 +1319,10 @@ export function main() {
     modeButton('view', 'tslope', 1);
     modeButton('view', 'rslope', 2);
     modeButton('view', 'river', 3);
+    y += button_spacing;
+    x = x0 + 25;
     modeButton('view', 'humid', 4);
+    modeButton('view', 'biomes', 5);
     y += button_spacing;
     x = x0;
     ui.print(style_labels, x, y + 2, Z.UI, 'Edit:');
