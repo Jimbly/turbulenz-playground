@@ -1,7 +1,3 @@
-
-Have River byte be 6 neighbors + 2-bit strahler number? (1-5)
-  Strahler is pretty trivial to calculate at load-time though
-
 Next steps:
   Add getBiomeType() preview here and see what biomes get generated where
     Based on: tslope, elev, humidity?  Ignore elev for now? some scale slope by elev (but, want mountainous coasts)?

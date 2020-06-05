@@ -157,7 +157,7 @@ export function main() {
   let util = new Uint8Array(tex_total_size);
   let tslope = new Uint8Array(tex_total_size);
   let rslope = new Uint8Array(tex_total_size);
-  let river = new Uint16Array(tex_total_size);
+  let river = new Uint8Array(tex_total_size);
   let relev = new Uint32Array(tex_total_size);
   let rstrahler = new Uint8Array(tex_total_size);
   let coast_distance = new Uint8Array(tex_total_size);
@@ -538,6 +538,8 @@ export function main() {
           }
           todo = next;
         }
+        coast_distance[0] = coast_distance[1] + 1;
+        coast_distance[total_size - 1] = coast_distance[total_size - 2] + 1;
       }
       generateDF();
 
@@ -561,13 +563,11 @@ export function main() {
             }
           }
           if (open_count >= 4) {
-            //river[pos] = 0;
             return;
           }
           assert(open_count);
           if (open_count === 1) {
             // perfect
-            //river[pos] = 255;
             rank[0].push(pos);
             return;
           }
@@ -589,15 +589,11 @@ export function main() {
             ++count;
           }
           if (count !== open_count) {
-            //river[pos] = 10;
             return;
           }
           let r = !rand.range(open_count === 2 ? 4 : 2);
           if (r) {
             rank[open_count - 1].push(pos);
-            //river[pos] = 200;
-          } else {
-            //river[pos] = 50;
           }
         });
         let blocked = [];
@@ -607,7 +603,6 @@ export function main() {
           for (let jj = 0; jj < list.length; ++jj) {
             let pos = list[jj];
             if (blocked[pos]) {
-              //river[pos] = 75;
               continue;
             }
             coastlines.push(pos);
@@ -982,6 +977,17 @@ export function main() {
       generateHumidity();
     }
 
+    function mergeStrahlerIntoRiver() {
+      for (let ii = 0; ii < total_size; ++ii) {
+        let r = river[ii];
+        if (r) {
+          let s = clamp(rstrahler[ii] - 1, 0, 3);
+          river[ii] = r | (s << 6);
+        }
+      }
+    }
+    mergeStrahlerIntoRiver();
+
     // interleave data
     let tslope_min = typeof opts.tslope.min === 'object' ? opts.tslope.min.add + opts.tslope.min.mul : opts.tslope.min;
     let tslope_range = typeof opts.tslope.range === 'object' ?
@@ -1135,7 +1141,7 @@ export function main() {
           y += ui.font_height;
           ui.print(style_labels, x, y, z, `RProir: ${debug_priority[idx]}`);
           y += ui.font_height;
-          ui.print(style_labels, x, y, z, `Strahler: ${rstrahler[idx]}`);
+          ui.print(style_labels, x, y, z, `Strahler: ${rstrahler[idx]} (${river[idx] ? (river[idx] >> 6) + 1 : 0})`);
           y += ui.font_height;
           ui.print(style_labels, x, y, z, `Humidity: ${humidity[idx]}`);
           y += ui.font_height;

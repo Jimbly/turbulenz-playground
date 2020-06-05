@@ -124,7 +124,7 @@ void main(void) {
 
     //color *= color;
     vec4 bits1;
-    vec2 bits2;
+    vec3 bits2;
     float bits_source = tex_extra.x * 255.0;
     bits1.x = bits_source * 0.5 + 0.1;
     bits1.y = floor(bits1.x) * 0.5 + 0.1;
@@ -132,16 +132,17 @@ void main(void) {
     bits1.w = floor(bits1.z) * 0.5 + 0.1;
     bits2.x = floor(bits1.w) * 0.5 + 0.1;
     bits2.y = floor(bits2.x) * 0.5 + 0.1;
+    bits2.z = floor(bits2.y) * 0.25 + 0.1;
     bits1 = floor(fract(bits1) * 2.0);
-    bits2 = floor(fract(bits2) * 2.0);
+    bits2 = floor(fract(bits2) * vec3(2.0, 2.0, 4.0));
 
-    float strahler = tex_extra.z;
+    float strahler = 1.0 + bits2.z; // tex_extra.z * 255.0;
 
     fracx = fracx * 0.75 + 0.25;
     float r = 0.0;
     vec2 pt = vec2(fracx, fracy);
     float dist = pointLineDist(vec2(0.5, 0.0), vec2(0.0, 1.0), pt);
-    float RHWIDTH = min(strahler * 255.0 * 0.04, 0.24);
+    float RHWIDTH = min(strahler * 0.04, 0.24);
     if (dist < RHWIDTH) {
       r += dot(bits1.wx, vec2(fracy < 0.5 ? 1.0 : 0.0, fracy < 0.5 ? 0.0 : 1.0));
     }
