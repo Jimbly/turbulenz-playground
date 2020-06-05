@@ -121,6 +121,7 @@ void main(void) {
     //color = vec3(tex.w);
     float relev = tex_extra.y;
     color = vec3(relev * 4.0);
+
     //color *= color;
     vec4 bits1;
     vec2 bits2;
@@ -161,6 +162,12 @@ void main(void) {
       color.rgb = vec3(0.0, 0.0, strahler * 48.0);
     }
     if (land == 0.0) {
+      color = vec3(0.0, 0.0, 1.0 - tex_extra.y);
+    }
+  } else if (mode == 4.0) {
+    if (land == 1.0) {
+      color = tex_extra.www;
+    } else {
       color = vec3(0.0, 0.0, 1.0 - tex_extra.y);
     }
   }

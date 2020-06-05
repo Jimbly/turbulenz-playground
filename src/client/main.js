@@ -28,7 +28,7 @@ Z.UI_TEST = 200;
 
 // let app = exports;
 // Virtual viewport for our game logic
-export const game_width = 320;
+export const game_width = 480;
 export const game_height = 240;
 
 export function main() {
@@ -65,8 +65,8 @@ export function main() {
   shaders.addGlobal('hex_param', hex_param);
 
   let modes = {
-    view: 3,
-    edit: 3,
+    view: 4,
+    edit: 4,
   };
 
   let debug_tex1;
@@ -132,6 +132,17 @@ export function main() {
       warp_freq: 1,
       warp_amp: 1,
     },
+    humidity: {
+      frequency: 2.2,
+      amplitude: 1,
+      persistence: 0.5,
+      lacunarity: 4,
+      octaves: 3,
+      domain_warp: 0,
+      warp_freq: 1,
+      warp_amp: 1,
+      rainshadow: 0.5,
+    },
   };
   let tex_total_size = hex_tex_size * hex_tex_size;
   let land = new Uint8Array(tex_total_size);
@@ -143,6 +154,7 @@ export function main() {
   let relev = new Uint32Array(tex_total_size);
   let rstrahler = new Uint8Array(tex_total_size);
   let coast_distance = new Uint8Array(tex_total_size);
+  let humidity = new Uint8Array(tex_total_size);
   let tex_data1 = new Uint8Array(tex_total_size * 4);
   let tex_data2 = new Uint8Array(tex_total_size * 4);
   let debug_priority = [];
@@ -858,9 +870,85 @@ export function main() {
           }
         }
       }
-
     }
     generateOcean();
+
+    function generateHumidity() {
+      function generateSlope() {
+        for (let y = 0; y < height; ++y) {
+          for (let x = 0; x < width; ++x) {
+            let pos = y * width + x;
+            if (land[pos]) {
+              // hexPosToUnifPos(x, y);
+              // let noise_v = sample();
+              let elev = relev[pos];
+              let right_slope = 0; // if positive, slopes down to the right
+              let neighbors = (x & 1) ? neighbors_odd : neighbors_even;
+              for (let ii = 1; ii < 6; ++ii) {
+                if (ii === 3) {
+                  continue;
+                }
+                let npos = pos + neighbors[ii];
+                let nelev = relev[npos];
+                if (!land[npos]) {
+                  nelev *= -0.001;
+                }
+                if (ii < 3) {
+                  right_slope += elev - nelev;
+                } else {
+                  right_slope += nelev - elev;
+                }
+              }
+              humidity[pos] = clamp(128 + 127 * right_slope / 20, 0, 255);
+            } else {
+              humidity[pos] = 128;
+            }
+          }
+        }
+      }
+      generateSlope();
+      function blurSlope() {
+        for (let y = 0; y < height; ++y) {
+          for (let x = 0; x < width; ++x) {
+            let pos = y * width + x;
+            if (land[pos]) {
+              let neighbors = (x & 1) ? neighbors_odd : neighbors_even;
+              let total = humidity[pos];
+              let count = 1;
+              for (let ii = 1; ii < 6; ++ii) {
+                let npos = pos + neighbors[ii];
+                if (land[npos]) {
+                  total += humidity[npos];
+                  count++;
+                }
+              }
+              humidity[pos] = round(total / count);
+            }
+          }
+        }
+      }
+      blurSlope();
+      function addToNoise() {
+        initNoise(opts.humidity);
+        for (let y = 0; y < height; ++y) {
+          for (let x = 0; x < width; ++x) {
+            let pos = y * width + x;
+            hexPosToUnifPos(x, y);
+            let noise_v = sample();
+            let rainshadow = (humidity[pos] - 128) / 127;
+            rainshadow = ((rainshadow >= 0) ? 0.25 : -0.25) + rainshadow * 0.75; // [-1,-0.25] or [0.25,1.0]
+            let rainshadow_effect = get('rainshadow'); // [0,1]
+            rainshadow *= rainshadow_effect;
+            noise_v = ((noise_v + rainshadow) + rainshadow_effect) / (1 + rainshadow_effect * 2); // [0,1]
+            humidity[pos] = clamp(noise_v * 255, 0, 255);
+          }
+        }
+      }
+      addToNoise();
+    }
+    if (modes.view >= 3) {
+      generateHumidity();
+    }
 
     // interleave data
     let tslope_min = typeof opts.tslope.min === 'object' ? opts.tslope.min.add + opts.tslope.min.mul : opts.tslope.min;
@@ -876,7 +964,7 @@ export function main() {
       tex_data2[ii*4] = river[ii];
       tex_data2[ii*4+1] = land[ii] ? opts.river.show_elev ? min(relev[ii]/opts.rslope.steps, 255) : 0 : relev[ii];
       tex_data2[ii*4+2] = rstrahler[ii];
-      tex_data2[ii*4+3] = coast_distance[ii];
+      tex_data2[ii*4+3] = humidity[ii];
     }
 
     if (!debug_tex1) {
@@ -1013,6 +1101,10 @@ export function main() {
           y += ui.font_height;
           ui.print(style_labels, x, y, z, `Strahler: ${rstrahler[idx]}`);
           y += ui.font_height;
+          ui.print(style_labels, x, y, z, `Humidity: ${humidity[idx]}`);
+          y += ui.font_height;
+          ui.print(style_labels, x, y, z, `Cost Distance: ${coast_distance[idx]}`);
+          y += ui.font_height;
           let rbits = river[idx];
           ui.print(style_labels, x, y, z, `River: ${rbits&1?'Up':'  '} ${rbits&2?'UR':'  '} ` +
             `${rbits&4?'LR':'  '} ${rbits&8?'Dn':'  '} ${rbits&16?'LL':'  '} ${rbits&32?'UL':'  '}`);
@@ -1117,6 +1209,7 @@ export function main() {
     modeButton('view', 'tslope', 1);
     modeButton('view', 'rslope', 2);
     modeButton('view', 'river', 3);
+    modeButton('view', 'humid', 4);
     y += button_spacing;
     x = x0;
     ui.print(style_labels, x, y + 2, Z.UI, 'Edit:');
@@ -1125,7 +1218,8 @@ export function main() {
     modeButton('edit', 'tslope', 1);
     modeButton('edit', 'rslope', 2);
     modeButton('edit', 'river', 3);
-    modeButton('edit', 'ocean', 4);
+    modeButton('edit', 'humid', 4);
+    modeButton('edit', 'ocean', 5);
     y += button_spacing;
     x = x0;
 
@@ -1181,6 +1275,18 @@ export function main() {
       toggle('show_elev');
       toggle('prune');
     } else if (modes.edit === 4) {
+      subopts = opts.humidity;
+      slider('frequency', 0.1, 10, 1, true);
+      slider('persistence', 0.01, 2, 2, true);
+      slider('lacunarity', 1, 10.0, 2, true);
+      slider('octaves', 1, 10, 0);
+      slider('domain_warp', 0, 2, 0);
+      if (subopts.domain_warp) {
+        slider('warp_freq', 0.01, 3, 1);
+        slider('warp_amp', 0, 2, 2);
+      }
+      slider('rainshadow', 0, 1, 2, true);
+    } else if (modes.edit === 5) {
       subopts = opts.ocean;
       slider('frequency', 0.1, 10, 1, true);
       slider('persistence', 0.01, 2, 2, true);

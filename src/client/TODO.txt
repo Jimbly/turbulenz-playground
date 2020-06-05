@@ -1,3 +1,18 @@
+Combine all elevation into a single scalar, so calculating normal/slope is simple without knowing land/ocean!
+  Also, need to tune what kind of values these are - is 256 enough precision?  Probably not for lowlands
+
+Add "relief view" checkbox on humidity that just shows the sexy relief view
+
+Have River byte be 6 neighbors + 2-bit strahler number? (1-5)
+  Strahler is pretty trivial to calculate at load-time though
+
+Next steps:
+  Add getBiomeType() preview here and see what biomes get generated where
+    Based on: tslope, elev, humidity?  Ignore elev for now? some scale slope by elev (but, want mountainous coasts)?
+  Export image into game and generate just height (flat biome) for whole world, see what it feels like (just LODs?)
+    Also add rivers?
+
+
 Change tex height to be smaller so total represents a square area?
   Would this make it difficult to map to a megagrid?
   Better for previewing at least, though only slightly faster?
