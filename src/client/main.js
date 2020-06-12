@@ -350,8 +350,7 @@ export function main() {
       function spreadSeas(v) {
         while (todo.length) {
           let pos = todo.pop();
-          let x = pos % id_factor;
-          let neighbors = (x & 1) ? neighbors_odd : neighbors_even;
+          let neighbors = (pos & 1) ? neighbors_odd : neighbors_even;
           for (let ii = 0; ii < neighbors.length; ++ii) {
             tryMark(pos + neighbors[ii], v);
           }
@@ -382,8 +381,7 @@ export function main() {
           let adjacent = [];
           for (let ii = 0; ii < sea.length; ++ii) {
             let pos = sea[ii];
-            let x = pos % id_factor;
-            let neighbors = (x & 1) ? neighbors_odd : neighbors_even;
+            let neighbors = (pos & 1) ? neighbors_odd : neighbors_even;
             for (let nidx = 0; nidx < neighbors.length; ++nidx) {
               let npos = pos + neighbors[nidx];
               if (!checked[npos]) {
@@ -399,8 +397,7 @@ export function main() {
           outer:
           for (let ii = 0; ii < adjacent.length; ++ii) {
             let pos = adjacent[ii];
-            let x = pos % id_factor;
-            let neighbors = (x & 1) ? neighbors_odd : neighbors_even;
+            let neighbors = (pos & 1) ? neighbors_odd : neighbors_even;
             for (let nidx = 0; nidx < neighbors.length; ++nidx) {
               let npos = pos + neighbors[nidx];
               if (!checked[npos] && !land[npos] && fill[npos] === D_SEA) {
@@ -490,8 +487,7 @@ export function main() {
             let idx = rand.range(todo.length);
             let pos = todo[idx];
             ridx(todo, idx);
-            let x = pos % id_factor;
-            let neighbors = (x & 1) ? neighbors_odd : neighbors_even;
+            let neighbors = (pos & 1) ? neighbors_odd : neighbors_even;
             for (let ii = 0; ii < neighbors.length; ++ii) {
               tryMark(pos + neighbors[ii], v, ii);
             }
@@ -522,8 +518,7 @@ export function main() {
           let next = [];
           for (let ii = 0; ii < todo.length; ++ii) {
             let pos = todo[ii];
-            let x = pos % id_factor;
-            let neighbors = (x & 1) ? neighbors_odd : neighbors_even;
+            let neighbors = (pos & 1) ? neighbors_odd : neighbors_even;
             for (let jj = 0; jj < neighbors.length; ++jj) {
               let npos = pos + neighbors[jj];
               if (!util[npos]) {
@@ -554,8 +549,7 @@ export function main() {
       function filterCoastalRivers() {
         let rank = [[],[],[]];
         coastlines.forEach(function (pos) {
-          let x = pos % id_factor;
-          let neighbors = (x & 1) ? neighbors_odd : neighbors_even;
+          let neighbors = (pos & 1) ? neighbors_odd : neighbors_even;
           let open_count = 0;
           let open_bits = 0;
           for (let ii = 0; ii < neighbors.length; ++ii) {
@@ -609,8 +603,7 @@ export function main() {
               continue;
             }
             coastlines.push(pos);
-            let x = pos % id_factor;
-            let neighbors = (x & 1) ? neighbors_odd : neighbors_even;
+            let neighbors = (pos & 1) ? neighbors_odd : neighbors_even;
             for (let kk = 0; kk < neighbors.length; ++kk) {
               let npos = pos + neighbors[kk];
               blocked[npos] = true;
@@ -676,8 +669,7 @@ export function main() {
         function validGrowth(frompos, topos) {
           // Not too high relative to neighbors?
           let new_elev = relev[frompos] + rslope[topos];
-          let x = topos % id_factor;
-          let neighbors = (x & 1) ? neighbors_odd : neighbors_even;
+          let neighbors = (topos & 1) ? neighbors_odd : neighbors_even;
           for (let ii = 0; ii < neighbors.length; ++ii) {
             let npos = topos + neighbors[ii];
             if (river[npos]) {
@@ -695,8 +687,7 @@ export function main() {
             break;
           }
           // Check all 6 neighbors, find any that are expandable
-          let x = pos % id_factor;
-          let neighbors = (x & 1) ? neighbors_odd : neighbors_even;
+          let neighbors = (pos & 1) ? neighbors_odd : neighbors_even;
           let options = [];
           let cur_bits = river[pos];
           let bad_bits = cur_bits | cur_bits << 1 | cur_bits >> 1 | cur_bits >> 5 | cur_bits << 5;
@@ -771,8 +762,7 @@ export function main() {
           if (!out.length) {
             s = 1;
           } else {
-            let x = pos % id_factor;
-            let neighbors = (x & 1) ? neighbors_odd : neighbors_even;
+            let neighbors = (pos & 1) ? neighbors_odd : neighbors_even;
             if (out.length === 1) {
               s = fillStrahler(pos + neighbors[out[0]], (out[0] + 3) % 6);
             } else {
@@ -801,8 +791,7 @@ export function main() {
             river[pos] = 0;
             rstrahler[pos] = 0;
             relev[pos] = 0;
-            let x = pos % id_factor;
-            let neighbors = (x & 1) ? neighbors_odd : neighbors_even;
+            let neighbors = (pos & 1) ? neighbors_odd : neighbors_even;
             for (let ii = 0; ii < 6; ++ii) {
               if (bits & (1 << ii)) {
                 let npos = pos + neighbors[ii];
@@ -831,8 +820,7 @@ export function main() {
           let next_nodes = [];
           for (let ii = 0; ii < work_nodes.length; ++ii) {
             let pos = work_nodes[ii];
-            let x = pos % id_factor;
-            let neighbors = (x & 1) ? neighbors_odd : neighbors_even;
+            let neighbors = (pos & 1) ? neighbors_odd : neighbors_even;
             let nheight = relev[pos] + tslope[pos];
             for (let jj = 0; jj < neighbors.length; ++jj) {
               let npos = pos + neighbors[jj];
@@ -1110,6 +1098,19 @@ export function main() {
       });
     }
     console.log(`Debug texture update in ${(Date.now() - start)}ms`);
+  }
+
+  function doExport() {
+    let lines = [];
+    lines.push('/* eslint max-len:off */');
+    lines.push('window.continent_data = {');
+    lines.push(`  sea_level: ${opts.output.sea_range},`);
+    lines.push(`  max_elevation: ${opts.output.sea_range + opts.output.land_range},`);
+    lines.push(`  elev: new Uint16Array([${relev}]),`);
+    lines.push(`  humidity: new Uint8Array([${humidity}]),`);
+    lines.push(`  river: new Uint8Array([${river}]),`);
+    lines.push('};\n');
+    net.client.send('export', lines.join('\n'));
   }
 
   hex_param[1] = modes.view;
@@ -1420,6 +1421,11 @@ export function main() {
       slider('land_range_exp', 6, 15, 0);
       subopts.sea_range = 1 << subopts.sea_range_exp;
       subopts.land_range = 1 << subopts.land_range_exp;
+
+      if (ui.buttonText({ x, y, text: 'Export' })) {
+        doExport();
+      }
+      y += button_spacing;
     }
     hex_param[2] = opts.rslope.steps;
   }

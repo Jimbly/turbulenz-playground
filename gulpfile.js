@@ -399,6 +399,13 @@ gulp.task('nodemon', gulp.series(...deps, (done) => {
   if (args.debug) {
     options.nodeArgs.push('--debug');
   }
+
+  if (args.port) {
+    options.args.push(`--port=${args.port}`);
+    assert.equal(options.nodeArgs[0], '--inspect');
+    options.nodeArgs[0] = `--inspect=${9229 + Number(args.port) - 3000}`;
+  }
+
   nodemon(options);
   done();
 }));
@@ -410,7 +417,7 @@ gulp.task('browser-sync', gulp.series('nodemon', (done) => {
 
     // informs browser-sync to proxy our expressjs app which would run at the following location
     proxy: {
-      target: 'http://localhost:3000',
+      target: `http://localhost:${args.port || process.env.port || 3000}`,
       ws: true,
     },
 

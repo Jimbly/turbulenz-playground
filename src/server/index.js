@@ -38,6 +38,9 @@ app.use(express_static_gzip('data_store/public', {
 glov_server.startup({ server, server_https });
 
 // test_worker.init(glov_server.channel_server);
+glov_server.channel_server.ws_server.onMsg('export', function (client, data, resp_func) {
+  fs.writeFile('c:/src/frvr/worlds/src/client/vendor/continent_data.js', data, resp_func);
+});
 
 let port = argv.port || process.env.port || 3000;
 

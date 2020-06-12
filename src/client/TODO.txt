@@ -1,15 +1,17 @@
-Get a picture of current biome distribution out at this same scale (256x256 hexomes)
-
-
 Next steps:
-  Export image into game and generate just height (flat biome) for whole world, see what it feels like (just LODs?)
-    Also add rivers?
+  !!! Export image into game and generate just height (flat biome) for whole world, see what it feels like (just LODs?)
+    - Export data as: just parallel JS arrays (land bit? (no, implicit from elev), elev 16bit, river 6bit, humidity 8bit?, cdist 8bit?)
+    Also see rivers in-game?
 
+
+Add Uniformish, interesting low-level noise for base sea level elevation on edges (low 25%?) that we can blend to regardless of interior sea level choices
 
 Getting way too much contiguous mountain, yet not enough smaller mountain ranges
   Output is pretty good with 128hx maps, scale mountain_cutoff by 1.5, is_cliff by 2
+  Maybe try: place mountain ranges based on drainage basin ridges, irregardless of height?
+  Maybe try: adding interior lakes as sinks, and then maybe convert one drainage basin into an outlet to flow to the ocean? Or we draw a random river and use that to calc elevation of the lake and seed our simulation with that?
 
-Change tex height to be smaller so total represents a square area?
+Change texture height to be smaller so total represents a square area?
   Would this make it difficult to map to a megagrid?
   Better for previewing at least, though only slightly faster?
   Later? Allow this to be otherwise rectangular, for varied continent generation?
