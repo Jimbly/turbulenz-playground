@@ -93,6 +93,8 @@ export function getBiomeV2(is_land, tot_slope, elev, humidity, choice, cdist) {
   if (!is_land) {
     return OCEAN;
   }
+  tot_slope *= 4;
+  elev *= 4;
   let is_cliff = tot_slope > 0.6;
   if (is_cliff) {
     return CLIFFS;

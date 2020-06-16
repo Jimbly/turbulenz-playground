@@ -7,7 +7,7 @@ const { getBiomeV2 } = require('./biome_test.js');
 const camera2d = require('./glov/camera2d.js');
 const engine = require('./glov/engine.js');
 const input = require('./glov/input.js');
-const { abs, max, min, floor, round, sqrt } = Math;
+const { abs, max, min, floor, round, pow, sqrt } = Math;
 const net = require('./glov/net.js');
 const { randCreate } = require('./glov/rand_alea.js');
 const shaders = require('./glov/shaders.js');
@@ -66,7 +66,7 @@ export function main() {
   shaders.addGlobal('hex_param', hex_param);
 
   let modes = {
-    view: 5,
+    view: 3,
     edit: 3,
   };
 
@@ -133,6 +133,12 @@ export function main() {
       domain_warp: 1,
       warp_freq: 1,
       warp_amp: 1,
+    },
+    mountainify: {
+      height_scale: 3,
+      radius: 10,
+      weight_local: 0.25,
+      power: 4,
     },
     humidity: {
       frequency: 2.2,
@@ -847,6 +853,82 @@ export function main() {
     }
     growRivers();
 
+    function mountainify() {
+      subopts = opts.mountainify;
+      let points = [];
+      let radius = subopts.radius;
+      let height_scale = subopts.height_scale;
+      let rsquared = radius*radius;
+      function choosePoints() {
+        points.push(146 + 141 * width);
+      }
+      choosePoints();
+      function growMountain(pos) {
+        let { weight_local, power } = subopts;
+        let weight_abs = 1 - weight_local;
+        let avg_height = 0;
+        let avg_count = 0;
+        let x0 = pos % width;
+        let y0 = (pos - x0) / width;
+        // Find average height under the mountain within the radius
+        // PERFTODO: If constant radius, could pre-build an array of just the
+        //   index-offsets of points that pass the range tests and pre-compute
+        //   their weights.
+
+        // Weighted average of entire area
+        for (let dx = -radius; dx <= radius; ++dx) {
+          for (let dy = -radius; dy <= radius; ++dy) {
+            let dsq = dx*dx + dy*dy;
+            if (dsq >= rsquared) {
+              continue;
+            }
+            let x = x0 + dx;
+            let y = y0 + dy;
+            if (x < 0 || x >= width || y < 0 || y >= height) {
+              continue;
+            }
+            let pos_idx = y * width + x;
+            if (!land[pos_idx]) {
+              continue;
+            }
+            //let w = 1 - dsq / rsquared; // 1 in center, 0 on edge
+            let w = dsq / rsquared; // 0 in center, 1 on edge
+            avg_height += relev[y * width + x] * w;
+            avg_count += w;
+          }
+        }
+        avg_height /= avg_count;
+        // Scale up exponentially in the middle
+        let center_dh = relev[pos] - avg_height;
+        for (let dx = -radius; dx <= radius; ++dx) {
+          for (let dy = -radius; dy <= radius; ++dy) {
+            let dsq = dx*dx + dy*dy;
+            if (dsq >= rsquared) {
+              continue;
+            }
+            let x = x0 + dx;
+            let y = y0 + dy;
+            if (x < 0 || x >= width || y < 0 || y >= height) {
+              continue;
+            }
+            let pos_idx = y * width + x;
+            if (!land[pos_idx]) {
+              continue;
+            }
+            let elev = relev[pos_idx];
+            let dh = elev - avg_height;
+            let scale = 1 - sqrt(dsq) / radius;
+            scale = pow(scale, power);
+            relev[pos_idx] = elev + (weight_local * max(0, dh) + weight_abs * center_dh) * height_scale * scale;
+          }
+        }
+      }
+      for (let ii = 0; ii < points.length; ++ii) {
+        growMountain(points[ii]);
+      }
+    }
+    mountainify();
+
     function generateOcean() {
       initNoise(opts.ocean);
       for (let jj = 0; jj < height; ++jj) {
@@ -867,22 +949,26 @@ export function main() {
     generateOcean();
 
     function generateOutput() {
-      let max_depth = 0;
-      let max_height = 0;
+      // let max_depth = 0; // always 255
+      // let max_height = 0;
+      // Empirical estimate on 256x256 texture, before mountainifying
+      let est_max_output = opts.rslope.steps * 50 + 80;
+      // covert to a height in quarter-voxels for output
+      let qu_voxel_scale = 1 / est_max_output * opts.output.land_range / 2;
+      // for (let pos = 0; pos < total_size; ++pos) {
+      //   let e = relev[pos];
+      //   if (land[pos]) {
+      //     max_height = max(max_height, e);
+      //   } else {
+      //     max_depth = max(max_depth, e);
+      //   }
+      // }
       for (let pos = 0; pos < total_size; ++pos) {
         let e = relev[pos];
         if (land[pos]) {
-          max_height = max(max_height, e);
+          e = opts.output.sea_range + e * qu_voxel_scale; // (e / max_height) * opts.output.land_range;
         } else {
-          max_depth = max(max_depth, e);
-        }
-      }
-      for (let pos = 0; pos < total_size; ++pos) {
-        let e = relev[pos];
-        if (land[pos]) {
-          e = opts.output.sea_range + (e / max_height) * opts.output.land_range;
-        } else {
-          e = opts.output.sea_range - 1 - (e / max_depth) * opts.output.sea_range;
+          e = opts.output.sea_range - 1 - e / 255 * opts.output.sea_range;
         }
         relev[pos] = max(0, round(e));
       }
@@ -890,7 +976,7 @@ export function main() {
     generateOutput();
 
     let total_range = opts.output.land_range; // + opts.output.sea_range; - sea isn't used for slope, for the most part
-    let slope_mul = 1024 / total_range;
+    let slope_mul = 4096 / total_range;
     function generateHumidity() {
       function generateSlope() {
         for (let y = 0; y < height; ++y) {
@@ -1019,10 +1105,6 @@ export function main() {
             tot_slope += slope;
             //max_slope = max(max_slope, slope);
           }
-          //let is_cliff = tot_slope > 0.6;
-          //let is_cliff = max_slope > 0.2;
-          // Slope seems not numerically useful for biome choice, but avg_slope
-          //  over a threshold seems useful for an "is cliffs" flag
 
           let color = getBiomeV2(is_land, tot_slope, elev, humid, choice, cdist);
 
@@ -1206,7 +1288,7 @@ export function main() {
           y += ui.font_height;
           ui.print(style_labels, x, y, z, `RSlope: ${rslope[idx]}`);
           y += ui.font_height;
-          ui.print(style_labels, x, y, z, `RElev: ${relev[idx]}`);
+          ui.print(style_labels, x, y, z, `RElev: ${relev[idx] - opts.output.sea_range}`);
           y += ui.font_height;
           ui.print(style_labels, x, y, z, `RProir: ${debug_priority[idx]}`);
           y += ui.font_height;
@@ -1334,6 +1416,7 @@ export function main() {
     modeButton('edit', 'river', 3);
     y += button_spacing;
     x = x0 + 25;
+    modeButton('edit', 'mountain', 7);
     modeButton('edit', 'humid', 4);
     modeButton('edit', 'ocean', 5);
     modeButton('edit', 'output', 6);
@@ -1426,6 +1509,12 @@ export function main() {
         doExport();
       }
       y += button_spacing;
+    } else if (modes.edit === 7) {
+      subopts = opts.mountainify;
+      slider('height_scale', 0, 8, 1);
+      slider('radius', 2, 50, 0);
+      slider('weight_local', 0, 1, 2);
+      slider('power', 1, 8, 1);
     }
     hex_param[2] = opts.rslope.steps;
   }
