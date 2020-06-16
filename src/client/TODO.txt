@@ -1,10 +1,11 @@
-Next steps:
-  !!! Export image into game and generate just height (flat biome) for whole world, see what it feels like (just LODs?)
-    - Export data as: just parallel JS arrays (land bit? (no, implicit from elev), elev 16bit, river 6bit, humidity 8bit?, cdist 8bit?)
-    Also see rivers in-game?
+Try generating mountains/hills/plains hint for biome type selection (just in playground for now)
+
+Try different curve profiles (just different powers, or a different power slope in each axis?), maybe informed by local geometry
 
 
 Add Uniformish, interesting low-level noise for base sea level elevation on edges (low 25%?) that we can blend to regardless of interior sea level choices
+
+Detect perfectly flat islands and do something more interesting - island biome with local gen?
 
 Getting way too much contiguous mountain, yet not enough smaller mountain ranges
   Output is pretty good with 128hx maps, scale mountain_cutoff by 1.5, is_cliff by 2

@@ -7,7 +7,7 @@ const { getBiomeV2 } = require('./biome_test.js');
 const camera2d = require('./glov/camera2d.js');
 const engine = require('./glov/engine.js');
 const input = require('./glov/input.js');
-const { abs, max, min, floor, round, pow, sqrt } = Math;
+const { abs, ceil, cos, max, min, floor, round, pow, sin, sqrt, PI } = Math;
 const net = require('./glov/net.js');
 const { randCreate } = require('./glov/rand_alea.js');
 const shaders = require('./glov/shaders.js');
@@ -67,7 +67,7 @@ export function main() {
 
   let modes = {
     view: 3,
-    edit: 3,
+    edit: 7,
   };
 
   let debug_tex1;
@@ -135,8 +135,11 @@ export function main() {
       warp_amp: 1,
     },
     mountainify: {
+      peak_radius: round(10 * hex_tex_size/256),
+      peak_percent: 0.80,
+      peak_k: 5,
       height_scale: 3,
-      radius: 10,
+      blend_radius: round(10 * hex_tex_size/256),
       weight_local: 0.25,
       power: 4,
     },
@@ -163,6 +166,7 @@ export function main() {
   let land = new Uint8Array(tex_total_size);
   let fill = new Uint8Array(tex_total_size);
   let util = new Uint8Array(tex_total_size);
+  let mountain_delta = new Uint32Array(tex_total_size);
   let tslope = new Uint8Array(tex_total_size);
   let rslope = new Uint8Array(tex_total_size);
   let river = new Uint8Array(tex_total_size);
@@ -855,16 +859,123 @@ export function main() {
 
     function mountainify() {
       subopts = opts.mountainify;
-      let points = [];
-      let radius = subopts.radius;
-      let height_scale = subopts.height_scale;
-      let rsquared = radius*radius;
-      function choosePoints() {
-        points.push(146 + 141 * width);
+      let { peak_radius, peak_percent, peak_k } = subopts;
+      let peak_rsquared = peak_radius * peak_radius;
+      let peak_candidates = [];
+      function choosePeakCandidateRegions() {
+        // Generate Poisson disk sampling across map
+        let cell_bound = peak_radius / sqrt(2);
+        let cell_w = ceil(width / cell_bound);
+        let cell_h = ceil(height / cell_bound);
+        let cells = new Int16Array(cell_w * cell_h);
+        let active = [];
+        function emitSample(pos) {
+          let posx = pos % width;
+          let posy = (pos - posx) / width;
+          let cellidx = ((posx / cell_bound)|0) + ((posy / cell_bound)|0) * cell_w;
+          peak_candidates.push(pos);
+          cells[cellidx] = peak_candidates.length;
+          active.push(pos);
+        }
+        emitSample(rand.range(total_size));
+
+        // From https://www.jasondavies.com/poisson-disc/
+        // Generate point chosen uniformly from spherical annulus between radius r and 2r from p.
+        let nx;
+        let ny;
+        function generateAround(px, py) {
+          let θ = rand.random() * 2 * PI;
+          let r = sqrt(rand.random() * 3 * peak_rsquared + peak_rsquared); // http://stackoverflow.com/a/9048443/64009
+          nx = (px + r * cos(θ)) | 0;
+          ny = (py + r * sin(θ)) | 0;
+        }
+
+        function near() {
+          let n = 2;
+          let x = nx / cell_bound | 0;
+          let y = ny / cell_bound | 0;
+          let x0 = max(x - n, 0);
+          let y0 = max(y - n, 0);
+          let x1 = min(x + n + 1, cell_w);
+          let y1 = min(y + n + 1, cell_h);
+          for (let yy = y0; yy < y1; ++yy) {
+            let o = yy * cell_w;
+            for (let xx = x0; xx < x1; ++xx) {
+              let g = cells[o + xx];
+              if (!g) {
+                continue;
+              }
+              g = peak_candidates[g - 1];
+              let gx = g % width;
+              let gy = (g - gx) / width;
+              let dsq = (nx - gx) * (nx - gx) + (ny - gy) * (ny - gy);
+              if (dsq < peak_rsquared) {
+                return true;
+              }
+            }
+          }
+          return false;
+        }
+
+        while (active.length) {
+          let active_idx = rand.range(active.length);
+          let pos = active[active_idx];
+          ridx(active, active_idx);
+          let posx = pos % width;
+          let posy = (pos - posx) / width;
+          for (let jj = 0; jj < peak_k; ++jj) {
+            generateAround(posx, posy);
+            if (nx < 0 || nx >= width || ny < 0 || ny >= height || near()) {
+              continue;
+            }
+            emitSample(nx + ny * width);
+          }
+        }
+        peak_candidates = peak_candidates.filter((a) => land[a]);
       }
-      choosePoints();
+      choosePeakCandidateRegions();
+      let points;
+      function choosePeaks() {
+        let peak_elev = [];
+        let search_r = (peak_radius / 2) | 0;
+        for (let ii = 0; ii < peak_candidates.length; ++ii) {
+          let pos = peak_candidates[ii];
+          let posx = pos % width;
+          let posy = (pos - posx) / width;
+          let x0 = max(0, posx - search_r);
+          let x1 = min(width - 1, posx + search_r);
+          let y0 = max(0, posy - search_r);
+          let y1 = min(height - 1, posy + search_r);
+          let max_elev = relev[pos];
+          let max_pos = pos;
+          for (let yy = y0; yy <= y1; ++yy) {
+            for (let xx = x0; xx <= x1; ++xx) {
+              let p = xx + yy * width;
+              let e = relev[p];
+              if (e > max_elev) {
+                max_elev = e;
+                max_pos = p;
+              }
+            }
+          }
+          peak_elev.push([max_elev, max_pos]);
+        }
+        peak_elev.sort((a,b) => b[0] - a[0]);
+        let keep = max(1, ceil(peak_percent * peak_elev.length));
+        peak_elev = peak_elev.slice(0, keep);
+        points = peak_elev.map((a) => a[1]);
+        // points = [146 + 141*width];
+      }
+      choosePeaks();
+
+      let {
+        blend_radius,
+        height_scale,
+        weight_local,
+        power,
+      } = subopts;
       function growMountain(pos) {
-        let { weight_local, power } = subopts;
+        let rsquared = blend_radius*blend_radius;
         let weight_abs = 1 - weight_local;
         let avg_height = 0;
         let avg_count = 0;
@@ -876,8 +987,8 @@ export function main() {
         //   their weights.
 
         // Weighted average of entire area
-        for (let dx = -radius; dx <= radius; ++dx) {
-          for (let dy = -radius; dy <= radius; ++dy) {
+        for (let dx = -blend_radius; dx <= blend_radius; ++dx) {
+          for (let dy = -blend_radius; dy <= blend_radius; ++dy) {
             let dsq = dx*dx + dy*dy;
             if (dsq >= rsquared) {
               continue;
@@ -900,8 +1011,13 @@ export function main() {
         avg_height /= avg_count;
         // Scale up exponentially in the middle
         let center_dh = relev[pos] - avg_height;
-        for (let dx = -radius; dx <= radius; ++dx) {
-          for (let dy = -radius; dy <= radius; ++dy) {
+        if (center_dh < 10) {
+          // the center is lower than the average - must have been at the edge of a peak selection radius, and
+          // on a slope, so probably not actually a good choice for a exaggerated peak
+          return;
+        }
+        for (let dx = -blend_radius; dx <= blend_radius; ++dx) {
+          for (let dy = -blend_radius; dy <= blend_radius; ++dy) {
             let dsq = dx*dx + dy*dy;
             if (dsq >= rsquared) {
               continue;
@@ -917,17 +1033,25 @@ export function main() {
             }
             let elev = relev[pos_idx];
             let dh = elev - avg_height;
-            let scale = 1 - sqrt(dsq) / radius;
+            let scale = 1 - sqrt(dsq) / blend_radius;
             scale = pow(scale, power);
-            relev[pos_idx] = elev + (weight_local * max(0, dh) + weight_abs * center_dh) * height_scale * scale;
+            let delta = (weight_local * max(0, dh) + weight_abs * center_dh) * height_scale * scale;
+            mountain_delta[pos_idx] = max(mountain_delta[pos_idx], delta);
           }
         }
       }
+      function applyGrowth() {
+        for (let pos_idx = 0; pos_idx < total_size; ++pos_idx) {
+          relev[pos_idx] += mountain_delta[pos_idx];
+        }
+      }
+
+      mountain_delta.fill(0);
       for (let ii = 0; ii < points.length; ++ii) {
         growMountain(points[ii]);
       }
+      applyGrowth();
     }
-    mountainify();
 
     function generateOcean() {
       initNoise(opts.ocean);
@@ -974,6 +1098,7 @@ export function main() {
       }
     }
     generateOutput();
+    mountainify();
 
     let total_range = opts.output.land_range; // + opts.output.sea_range; - sea isn't used for slope, for the most part
     let slope_mul = 4096 / total_range;
@@ -1511,8 +1636,11 @@ export function main() {
       y += button_spacing;
     } else if (modes.edit === 7) {
       subopts = opts.mountainify;
+      slider('peak_radius', 2, 50, 0);
+      slider('peak_percent', 0, 1, 2);
+      slider('peak_k', 1, 10, 0);
+      slider('blend_radius', 2, 50, 0);
       slider('height_scale', 0, 8, 1);
-      slider('radius', 2, 50, 0);
       slider('weight_local', 0, 1, 2);
       slider('power', 1, 8, 1);
     }
