@@ -7,7 +7,7 @@ const { getBiomeV2 } = require('./biome_test.js');
 const camera2d = require('./glov/camera2d.js');
 const engine = require('./glov/engine.js');
 const input = require('./glov/input.js');
-const { abs, ceil, cos, max, min, floor, round, pow, sin, sqrt, PI } = Math;
+const { abs, atan2, ceil, cos, max, min, floor, round, pow, sin, sqrt, PI } = Math;
 const net = require('./glov/net.js');
 const { randCreate } = require('./glov/rand_alea.js');
 const shaders = require('./glov/shaders.js');
@@ -15,7 +15,7 @@ const SimplexNoise = require('simplex-noise');
 const sprites = require('./glov/sprites.js');
 const textures = require('./glov/textures.js');
 const ui = require('./glov/ui.js');
-const { clamp, ridx } = require('../common/util.js');
+const { clamp, lerp, ridx } = require('../common/util.js');
 const {
   vec2, v2copy, v2lengthSq, v2mul, v2sub,
   vec4,
@@ -26,6 +26,10 @@ Z.BACKGROUND = 1;
 Z.SPRITES = 10;
 Z.PARTICLES = 20;
 Z.UI_TEST = 200;
+
+const TWOPI = PI * 2;
+
+const SKEW_X = 1 / (sqrt(1 - 0.5*0.5));
 
 // let app = exports;
 // Virtual viewport for our game logic
@@ -141,7 +145,9 @@ export function main() {
       height_scale: 3,
       blend_radius: round(10 * hex_tex_size/256),
       weight_local: 0.25,
-      power: 4,
+      power_min: 1,
+      power_max: 4,
+      power_blend: 0.25,
     },
     humidity: {
       frequency: 2.2,
@@ -972,10 +978,13 @@ export function main() {
         blend_radius,
         height_scale,
         weight_local,
-        power,
+        power_max,
+        power_min,
+        power_blend,
       } = subopts;
       function growMountain(pos) {
         let rsquared = blend_radius*blend_radius;
+        let horiz_radius = ceil(blend_radius * SKEW_X);
         let weight_abs = 1 - weight_local;
         let avg_height = 0;
         let avg_count = 0;
@@ -987,9 +996,9 @@ export function main() {
         //   their weights.
 
         // Weighted average of entire area
-        for (let dx = -blend_radius; dx <= blend_radius; ++dx) {
+        for (let dx = -horiz_radius; dx <= horiz_radius; ++dx) {
           for (let dy = -blend_radius; dy <= blend_radius; ++dy) {
-            let dsq = dx*dx + dy*dy;
+            let dsq = dx*dx + dy*dy; // Not quite accurate distance, but fine for this estimate
             if (dsq >= rsquared) {
               continue;
             }
@@ -1016,14 +1025,48 @@ export function main() {
           // on a slope, so probably not actually a good choice for a exaggerated peak
           return;
         }
-        for (let dx = -blend_radius; dx <= blend_radius; ++dx) {
+
+        // Decide which angle to apply the power curve
+        // Try just perpindicular to the 3 cardinal hex-axes
+        let angle_offs = PI/6;
+        let best_h = 0;
+        let angles = [
+          [-0.5, sqrt(3/4), PI/6],
+          [-1, 0, PI*3/6],
+          [-0.5, -sqrt(3/4), PI*5/6],
+          [0.5, -sqrt(3/4), PI*7/6],
+          [1, 0, PI*9/6],
+          [0.5, sqrt(3/4), PI*11/6],
+        ];
+        for (let ii = 0; ii < angles.length; ++ii) {
+          let sx = round(x0 + angles[ii][0] * blend_radius / 2 / SKEW_X);
+          let sy = round(y0 + angles[ii][1] * blend_radius / 2);
+          sx = clamp(sx, 0, width - 1);
+          sy = clamp(sy, 0, height - 1);
+          let h = relev[sx + sy * width];
+          if (h > best_h) {
+            best_h = h;
+            angle_offs = angles[ii][2];
+          }
+        }
+
+        for (let dx = -horiz_radius; dx <= horiz_radius; ++dx) {
           for (let dy = -blend_radius; dy <= blend_radius; ++dy) {
-            let dsq = dx*dx + dy*dy;
+            let x = x0 + dx;
+            let y = y0 + dy;
+            let unif_dx = (x - x0) / SKEW_X;
+            let unif_dy = y - y0;
+            if ((x0 & 1) !== (x & 1)) {
+              if (x0 & 1) {
+                unif_dy -= 0.5;
+              } else {
+                unif_dy += 0.5;
+              }
+            }
+            let dsq = unif_dx*unif_dx + unif_dy*unif_dy;
             if (dsq >= rsquared) {
               continue;
             }
-            let x = x0 + dx;
-            let y = y0 + dy;
             if (x < 0 || x >= width || y < 0 || y >= height) {
               continue;
             }
@@ -1034,7 +1077,13 @@ export function main() {
             let elev = relev[pos_idx];
             let dh = elev - avg_height;
             let scale = 1 - sqrt(dsq) / blend_radius;
-            scale = pow(scale, power);
+            let angle = atan2(unif_dx, unif_dy);
+            // TODO: add rotate here
+            angle = ((angle + angle_offs) + PI) % TWOPI - PI;
+            angle = abs(angle) / PI;
+            angle = clamp((angle - (1 - power_blend) / 2) / power_blend, 0, 1);
+            let eff_power = lerp(angle, power_min, power_max);
+            scale = pow(scale, eff_power);
             let delta = (weight_local * max(0, dh) + weight_abs * center_dh) * height_scale * scale;
             mountain_delta[pos_idx] = max(mountain_delta[pos_idx], delta);
           }
@@ -1642,7 +1691,9 @@ export function main() {
       slider('blend_radius', 2, 50, 0);
       slider('height_scale', 0, 8, 1);
       slider('weight_local', 0, 1, 2);
-      slider('power', 1, 8, 1);
+      slider('power_min', 1, 8, 1);
+      slider('power_max', 1, 8, 1);
+      slider('power_blend', 0.01, 1, 2);
     }
     hex_param[2] = opts.rslope.steps;
   }
