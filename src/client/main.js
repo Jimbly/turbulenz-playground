@@ -71,7 +71,7 @@ export function main() {
 
   let modes = {
     view: 3,
-    edit: 7,
+    edit: 8,
   };
 
   let debug_tex1;
@@ -82,12 +82,12 @@ export function main() {
     seed: 1,
     coast: {
       key: '',
-      frequency: 2, // 0.1,
+      frequency: 2,
       amplitude: 1,
       persistence: 0.5,
       lacunarity: { min: 1.6, max: 2.8, freq: 0.3 },
       octaves: 6,
-      cutoff: 0.5, // 0.22,
+      cutoff: 0.5,
       domain_warp: 0,
       warp_freq: 1,
       warp_amp: 0.1,
@@ -138,6 +138,16 @@ export function main() {
       warp_freq: 1,
       warp_amp: 1,
     },
+    lakes: {
+      lake_search_radius: round(10 * hex_tex_size/256),
+      lake_percent: 0.10,
+      lake_k: 5,
+      min_sep: round(40 * hex_tex_size/256),
+    },
+    blur: {
+      threshold: 500,
+      weight: 1,
+    },
     mountainify: {
       peak_radius: round(10 * hex_tex_size/256),
       peak_percent: 0.80,
@@ -148,6 +158,7 @@ export function main() {
       power_min: 1,
       power_max: 4,
       power_blend: 0.25,
+      cdist_ramp: 2,
     },
     humidity: {
       frequency: 2.2,
@@ -341,6 +352,7 @@ export function main() {
       -1, // lower left
       -1 + id_factor, // upper left,
     ];
+    let unfilled_seas = [];
     function fillSeas() {
       let todo = [];
       let done = [];
@@ -431,15 +443,206 @@ export function main() {
             }
           }
         }
-        if (!is_ocean && subopts.fill_seas) {
-          for (let ii = 0; ii < sea.length; ++ii) {
-            land[sea[ii]] = 255;
-            fill[sea[ii]] = D_OPEN;
+        if (!is_ocean) {
+          if (subopts.fill_seas) {
+            for (let ii = 0; ii < sea.length; ++ii) {
+              land[sea[ii]] = 255;
+              fill[sea[ii]] = D_OPEN;
+            }
+          } else {
+            unfilled_seas.push(sea);
           }
         }
       });
     }
     fillSeas();
+
+    // Generates poisson sampled points with between radius and 2 * radius between each
+    function poissonSample(radius, k) {
+      let ret = [];
+      let peak_rsquared = radius * radius;
+      let cell_bound = radius / sqrt(2);
+      let cell_w = ceil(width / cell_bound);
+      let cell_h = ceil(height / cell_bound);
+      let cells = new Int16Array(cell_w * cell_h);
+      let active = [];
+      function emitSample(pos) {
+        let posx = pos % width;
+        let posy = (pos - posx) / width;
+        let cellidx = ((posx / cell_bound)|0) + ((posy / cell_bound)|0) * cell_w;
+        ret.push(pos);
+        cells[cellidx] = ret.length;
+        active.push(pos);
+      }
+      emitSample(rand.range(total_size));
+
+      // From https://www.jasondavies.com/poisson-disc/
+      // Generate point chosen uniformly from spherical annulus between radius r and 2r from p.
+      let nx;
+      let ny;
+      function generateAround(px, py) {
+        let θ = rand.random() * 2 * PI;
+        let r = sqrt(rand.random() * 3 * peak_rsquared + peak_rsquared); // http://stackoverflow.com/a/9048443/64009
+        nx = (px + r * cos(θ)) | 0;
+        ny = (py + r * sin(θ)) | 0;
+      }
+
+      function near() {
+        let n = 2;
+        let x = nx / cell_bound | 0;
+        let y = ny / cell_bound | 0;
+        let x0 = max(x - n, 0);
+        let y0 = max(y - n, 0);
+        let x1 = min(x + n + 1, cell_w);
+        let y1 = min(y + n + 1, cell_h);
+        for (let yy = y0; yy < y1; ++yy) {
+          let o = yy * cell_w;
+          for (let xx = x0; xx < x1; ++xx) {
+            let g = cells[o + xx];
+            if (!g) {
+              continue;
+            }
+            g = ret[g - 1];
+            let gx = g % width;
+            let gy = (g - gx) / width;
+            let dsq = (nx - gx) * (nx - gx) + (ny - gy) * (ny - gy);
+            if (dsq < peak_rsquared) {
+              return true;
+            }
+          }
+        }
+        return false;
+      }
+
+      while (active.length) {
+        let active_idx = rand.range(active.length);
+        let pos = active[active_idx];
+        ridx(active, active_idx);
+        let posx = pos % width;
+        let posy = (pos - posx) / width;
+        for (let jj = 0; jj < k; ++jj) {
+          generateAround(posx, posy);
+          if (nx < 0 || nx >= width || ny < 0 || ny >= height || near()) {
+            continue;
+          }
+          emitSample(nx + ny * width);
+        }
+      }
+      return ret;
+    }
+
+    function findMaxPerRegion(candidates, map, radius) {
+      let ret = [];
+      for (let ii = 0; ii < candidates.length; ++ii) {
+        let pos = candidates[ii];
+        let posx = pos % width;
+        let posy = (pos - posx) / width;
+        let x0 = max(0, posx - radius);
+        let x1 = min(width - 1, posx + radius);
+        let y0 = max(0, posy - radius);
+        let y1 = min(height - 1, posy + radius);
+        let max_elev = map[pos];
+        let max_pos = pos;
+        for (let yy = y0; yy <= y1; ++yy) {
+          for (let xx = x0; xx <= x1; ++xx) {
+            let p = xx + yy * width;
+            let e = map[p];
+            if (e > max_elev) {
+              max_elev = e;
+              max_pos = p;
+            }
+          }
+        }
+        ret.push([max_elev, max_pos]);
+      }
+      ret.sort((a,b) => b[0] - a[0]);
+      return ret;
+    }
+
+    function generateLakes() {
+      subopts = opts.lakes;
+      function generateInlandDF() {
+        util.fill(0);
+        let todo = [];
+        let d = 0;
+        for (let pos = 0; pos < total_size; ++pos) {
+          if (!land[pos]) {
+            util[pos] = 1;
+            coast_distance[pos] = 0;
+            continue;
+          }
+          let neighbors = (pos & 1) ? neighbors_odd : neighbors_even;
+          for (let ii = 0; ii < neighbors.length; ++ii) {
+            let nidx = pos + neighbors[ii];
+            if (!land[nidx]) {
+              todo.push(pos);
+              coast_distance[pos] = d;
+              util[pos] = 1;
+              break;
+            }
+          }
+        }
+        while (todo.length) {
+          d = min(d + 1, 255);
+          let next = [];
+          for (let ii = 0; ii < todo.length; ++ii) {
+            let pos = todo[ii];
+            let neighbors = (pos & 1) ? neighbors_odd : neighbors_even;
+            for (let jj = 0; jj < neighbors.length; ++jj) {
+              let npos = pos + neighbors[jj];
+              if (!util[npos]) {
+                util[npos] = 1;
+                coast_distance[npos] = d;
+                if (fill[npos] !== D_BORDER) {
+                  next.push(npos);
+                }
+              }
+            }
+          }
+          todo = next;
+        }
+      }
+      generateInlandDF();
+
+      let { lake_search_radius, lake_k, lake_percent, min_sep } = subopts;
+      let check_points = poissonSample(lake_search_radius, lake_k);
+      let lake_elev = findMaxPerRegion(check_points, coast_distance, floor(lake_search_radius / 2));
+      lake_elev = lake_elev.filter((a) => a[0] > 2);
+      let want = floor(lake_elev.length * lake_percent);
+      let use = [];
+      let min_sep_sq = min_sep * min_sep;
+      for (let ii = 0; ii < lake_elev.length && use.length < want; ++ii) {
+        let pt = lake_elev[ii][1];
+        let px = pt % width;
+        let py = (pt - px) / width;
+        let too_close = false;
+        for (let jj = 0; jj < use.length; ++jj) {
+          let other = use[jj];
+          let dx = px - other[0];
+          let dy = py - other[1];
+          let dsq = dx*dx + dy*dy;
+          if (dsq < min_sep_sq) {
+            too_close = true;
+            break;
+          }
+        }
+        if (too_close) {
+          continue;
+        }
+        use.push([px, py]);
+      }
+
+      function placeLake(x, y) {
+        let pos = x + y * width;
+        fill[pos] = D_INLAND_SEA;
+        land[pos] = 0;
+        unfilled_seas.push([pos]);
+      }
+      for (let ii = 0; ii < use.length; ++ii) {
+        placeLake(use[ii][0], use[ii][1]);
+      }
+    }
+    generateLakes();
 
     function generateTerrainSlope() {
       initNoise(opts.tslope);
@@ -484,7 +687,7 @@ export function main() {
         let todo = [];
         function tryMark(pos, v, incoming_dir) {
           let d = fill[pos];
-          if (d !== D_SEA) {
+          if (d !== D_SEA && d !== D_INLAND_SEA) {
             if (d === D_OPEN) { // land
               fill[pos] = D_COASTLINE;
               let invdir = (incoming_dir + 3) % 6;
@@ -516,6 +719,11 @@ export function main() {
         tryMarkXY(width - 2, 1);
         tryMarkXY(width - 2, height - 2);
         tryMarkXY(1, height - 2);
+        for (let ii = 0; ii < unfilled_seas.length; ++ii) {
+          let sea = unfilled_seas[ii];
+          let pos = sea[rand.range(sea.length)];
+          tryMarkXY(pos % width, floor(pos / width));
+        }
         spreadSeas(D_SEA2);
       }
       findCandidates();
@@ -863,116 +1071,53 @@ export function main() {
     }
     growRivers();
 
+    function blurExtremeSlopes() {
+      subopts = opts.blur;
+      let { threshold, weight } = subopts;
+      let blurs = [];
+      for (let pos = 0; pos < total_size; ++pos) {
+        if (!land[pos] || river[pos]) {
+          continue;
+        }
+        let elev = relev[pos];
+        let neighbors = (pos & 1) ? neighbors_odd : neighbors_even;
+        let blur = false;
+        for (let ii = 0; ii < neighbors.length; ++ii) {
+          let nidx = pos + neighbors[ii];
+          let nelev = relev[nidx];
+          if (nelev - elev > threshold) {
+            blur = true;
+          }
+        }
+        if (blur) {
+          let total = elev;
+          for (let ii = 0; ii < neighbors.length; ++ii) {
+            let nidx = pos + neighbors[ii];
+            let nelev = relev[nidx];
+            total += max(opts.output.sea_range, nelev);
+          }
+          blurs.push([pos, lerp(weight, elev, round(total / 7))]);
+        }
+      }
+      for (let ii = 0; ii < blurs.length; ++ii) {
+        let b = blurs[ii];
+        relev[b[0]] = b[1];
+      }
+    }
+
     function mountainify() {
       subopts = opts.mountainify;
-      let { peak_radius, peak_percent, peak_k } = subopts;
-      let peak_rsquared = peak_radius * peak_radius;
-      let peak_candidates = [];
-      function choosePeakCandidateRegions() {
-        // Generate Poisson disk sampling across map
-        let cell_bound = peak_radius / sqrt(2);
-        let cell_w = ceil(width / cell_bound);
-        let cell_h = ceil(height / cell_bound);
-        let cells = new Int16Array(cell_w * cell_h);
-        let active = [];
-        function emitSample(pos) {
-          let posx = pos % width;
-          let posy = (pos - posx) / width;
-          let cellidx = ((posx / cell_bound)|0) + ((posy / cell_bound)|0) * cell_w;
-          peak_candidates.push(pos);
-          cells[cellidx] = peak_candidates.length;
-          active.push(pos);
-        }
-        emitSample(rand.range(total_size));
-
-        // From https://www.jasondavies.com/poisson-disc/
-        // Generate point chosen uniformly from spherical annulus between radius r and 2r from p.
-        let nx;
-        let ny;
-        function generateAround(px, py) {
-          let θ = rand.random() * 2 * PI;
-          let r = sqrt(rand.random() * 3 * peak_rsquared + peak_rsquared); // http://stackoverflow.com/a/9048443/64009
-          nx = (px + r * cos(θ)) | 0;
-          ny = (py + r * sin(θ)) | 0;
-        }
-
-        function near() {
-          let n = 2;
-          let x = nx / cell_bound | 0;
-          let y = ny / cell_bound | 0;
-          let x0 = max(x - n, 0);
-          let y0 = max(y - n, 0);
-          let x1 = min(x + n + 1, cell_w);
-          let y1 = min(y + n + 1, cell_h);
-          for (let yy = y0; yy < y1; ++yy) {
-            let o = yy * cell_w;
-            for (let xx = x0; xx < x1; ++xx) {
-              let g = cells[o + xx];
-              if (!g) {
-                continue;
-              }
-              g = peak_candidates[g - 1];
-              let gx = g % width;
-              let gy = (g - gx) / width;
-              let dsq = (nx - gx) * (nx - gx) + (ny - gy) * (ny - gy);
-              if (dsq < peak_rsquared) {
-                return true;
-              }
-            }
-          }
-          return false;
-        }
-
-        while (active.length) {
-          let active_idx = rand.range(active.length);
-          let pos = active[active_idx];
-          ridx(active, active_idx);
-          let posx = pos % width;
-          let posy = (pos - posx) / width;
-          for (let jj = 0; jj < peak_k; ++jj) {
-            generateAround(posx, posy);
-            if (nx < 0 || nx >= width || ny < 0 || ny >= height || near()) {
-              continue;
-            }
-            emitSample(nx + ny * width);
-          }
-        }
-        peak_candidates = peak_candidates.filter((a) => land[a]);
-      }
-      choosePeakCandidateRegions();
-      let points;
+      let { cdist_ramp, peak_radius, peak_percent, peak_k } = subopts;
+      let peak_candidates;
+      // Generate Poisson disk sampling across map
+      peak_candidates = poissonSample(peak_radius, peak_k).filter((a) => land[a]);
       function choosePeaks() {
-        let peak_elev = [];
-        let search_r = (peak_radius / 2) | 0;
-        for (let ii = 0; ii < peak_candidates.length; ++ii) {
-          let pos = peak_candidates[ii];
-          let posx = pos % width;
-          let posy = (pos - posx) / width;
-          let x0 = max(0, posx - search_r);
-          let x1 = min(width - 1, posx + search_r);
-          let y0 = max(0, posy - search_r);
-          let y1 = min(height - 1, posy + search_r);
-          let max_elev = relev[pos];
-          let max_pos = pos;
-          for (let yy = y0; yy <= y1; ++yy) {
-            for (let xx = x0; xx <= x1; ++xx) {
-              let p = xx + yy * width;
-              let e = relev[p];
-              if (e > max_elev) {
-                max_elev = e;
-                max_pos = p;
-              }
-            }
-          }
-          peak_elev.push([max_elev, max_pos]);
-        }
-        peak_elev.sort((a,b) => b[0] - a[0]);
+        let peak_elev = findMaxPerRegion(peak_candidates, relev, (peak_radius / 2) | 0);
         let keep = max(1, ceil(peak_percent * peak_elev.length));
         peak_elev = peak_elev.slice(0, keep);
-        points = peak_elev.map((a) => a[1]);
-        // points = [146 + 141*width];
+        return peak_elev.map((a) => a[1]);
       }
-      choosePeaks();
+      let points = choosePeaks();
 
       let {
         blend_radius,
@@ -1084,6 +1229,10 @@ export function main() {
             angle = clamp((angle - (1 - power_blend) / 2) / power_blend, 0, 1);
             let eff_power = lerp(angle, power_min, power_max);
             scale = pow(scale, eff_power);
+            let cdist = coast_distance[pos_idx];
+            if (cdist_ramp) {
+              scale *= clamp(cdist / cdist_ramp, 0, 1);
+            }
             let delta = (weight_local * max(0, dh) + weight_abs * center_dh) * height_scale * scale;
             mountain_delta[pos_idx] = max(mountain_delta[pos_idx], delta);
           }
@@ -1147,6 +1296,7 @@ export function main() {
       }
     }
     generateOutput();
+    blurExtremeSlopes();
     mountainify();
 
     let total_range = opts.output.land_range; // + opts.output.sea_range; - sea isn't used for slope, for the most part
@@ -1590,8 +1740,12 @@ export function main() {
     modeButton('edit', 'river', 3);
     y += button_spacing;
     x = x0 + 25;
-    modeButton('edit', 'mountain', 7);
+    modeButton('edit', 'lakes', 8);
+    modeButton('edit', 'blur', 9);
+    modeButton('edit', 'mtify', 7);
     modeButton('edit', 'humid', 4);
+    y += button_spacing;
+    x = x0 + 25;
     modeButton('edit', 'ocean', 5);
     modeButton('edit', 'output', 6);
     y += button_spacing;
@@ -1694,6 +1848,17 @@ export function main() {
       slider('power_min', 1, 8, 1);
       slider('power_max', 1, 8, 1);
       slider('power_blend', 0.01, 1, 2);
+      slider('cdist_ramp', 0, 50, 0);
+    } else if (modes.edit === 8) {
+      subopts = opts.lakes;
+      slider('lake_search_radius', 2, 50, 0);
+      slider('lake_percent', 0, 1, 2);
+      slider('lake_k', 1, 10, 0);
+      slider('min_sep', 2, 50, 0);
+    } else if (modes.edit === 9) {
+      subopts = opts.blur;
+      slider('threshold', 1, 2000, 0);
+      slider('weight', 0, 1, 2);
     }
     hex_param[2] = opts.rslope.steps;
   }

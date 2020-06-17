@@ -1,11 +1,16 @@
-Try generating mountains/hills/plains hint for biome type selection (just in playground for now)
+Try a blur pass - any pair of hexomes where their elevation difference is greater than X, replace both with a blurred value (plus a little noise?)
+  Or, since peaks are interesting, try just pulling up the lower one and repeating the search, or just bluring the lower one
+  What happens if one of these contains a river?
 
-Try different curve profiles (just different powers, or a different power slope in each axis?), maybe informed by local geometry
+Try generating mountains/hills/plains hint for biome type selection (just in playground for now)
 
 
 Add Uniformish, interesting low-level noise for base sea level elevation on edges (low 25%?) that we can blend to regardless of interior sea level choices
 
 Detect perfectly flat islands and do something more interesting - island biome with local gen?
+  Or, anything that is elev === 0 but is not a river, should be increased by tslope
+
+Add some chance for rivers to start at non-0 elevation so we get waterfalls into the ocean / lakes
 
 Getting way too much contiguous mountain, yet not enough smaller mountain ranges
   Output is pretty good with 128hx maps, scale mountain_cutoff by 1.5, is_cliff by 2
