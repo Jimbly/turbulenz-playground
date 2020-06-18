@@ -1,9 +1,15 @@
-Try a blur pass - any pair of hexomes where their elevation difference is greater than X, replace both with a blurred value (plus a little noise?)
-  Or, since peaks are interesting, try just pulling up the lower one and repeating the search, or just bluring the lower one
-  What happens if one of these contains a river?
+Want center of ocean hexome to be just barely under water level usually
 
 Try generating mountains/hills/plains hint for biome type selection (just in playground for now)
 
+
+Raise water level around lakes
+  Can do an efficient fill to determine highest possible level and take some percentage of that?
+  How do we communicate this to the game?  Separate water level array?  List of levels and we index into it somehow? List of center points and levels and client does a relatively efficient fill upon load?
+  Separate sea level array would RLE compress *really* well - could even RLE compress identical rows
+
+
+Need to use slope near the coast to decide the initial depth of the ocean next to it, or things interpolate poorly
 
 Add Uniformish, interesting low-level noise for base sea level elevation on edges (low 25%?) that we can blend to regardless of interior sea level choices
 

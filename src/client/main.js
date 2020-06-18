@@ -189,7 +189,9 @@ export function main() {
   let river = new Uint8Array(tex_total_size);
   let relev = new Uint32Array(tex_total_size);
   let rstrahler = new Uint8Array(tex_total_size);
+  let water_level = new Uint32Array(tex_total_size);
   let coast_distance = new Uint8Array(tex_total_size);
+  let ocean_distance = new Uint8Array(tex_total_size);
   let humidity = new Uint8Array(tex_total_size);
   let tex_data1 = new Uint8Array(tex_total_size * 4);
   let tex_data2 = new Uint8Array(tex_total_size * 4);
@@ -278,6 +280,7 @@ export function main() {
     const D_SEA2 = 3;
     const D_INLAND_SEA = 4;
     const D_COASTLINE = 5;
+    const D_LAKE = 6;
 
     function shuffleArray(arr) {
       for (let ii = arr.length - 1; ii >= 1; --ii) {
@@ -352,7 +355,9 @@ export function main() {
       -1, // lower left
       -1 + id_factor, // upper left,
     ];
+    let neighbors_bit = [neighbors_even, neighbors_odd];
     let unfilled_seas = [];
+    let lake_seeds = [];
     function fillSeas() {
       let todo = [];
       let done = [];
@@ -378,7 +383,7 @@ export function main() {
       function spreadSeas(v) {
         while (todo.length) {
           let pos = todo.pop();
-          let neighbors = (pos & 1) ? neighbors_odd : neighbors_even;
+          let neighbors = neighbors_bit[pos & 1];
           for (let ii = 0; ii < neighbors.length; ++ii) {
             tryMark(pos + neighbors[ii], v);
           }
@@ -409,7 +414,7 @@ export function main() {
           let adjacent = [];
           for (let ii = 0; ii < sea.length; ++ii) {
             let pos = sea[ii];
-            let neighbors = (pos & 1) ? neighbors_odd : neighbors_even;
+            let neighbors = neighbors_bit[pos & 1];
             for (let nidx = 0; nidx < neighbors.length; ++nidx) {
               let npos = pos + neighbors[nidx];
               if (!checked[npos]) {
@@ -425,7 +430,7 @@ export function main() {
           outer:
           for (let ii = 0; ii < adjacent.length; ++ii) {
             let pos = adjacent[ii];
-            let neighbors = (pos & 1) ? neighbors_odd : neighbors_even;
+            let neighbors = neighbors_bit[pos & 1];
             for (let nidx = 0; nidx < neighbors.length; ++nidx) {
               let npos = pos + neighbors[nidx];
               if (!checked[npos] && !land[npos] && fill[npos] === D_SEA) {
@@ -559,6 +564,7 @@ export function main() {
       return ret;
     }
 
+    let lakes = [];
     function generateLakes() {
       subopts = opts.lakes;
       function generateInlandDF() {
@@ -571,7 +577,7 @@ export function main() {
             coast_distance[pos] = 0;
             continue;
           }
-          let neighbors = (pos & 1) ? neighbors_odd : neighbors_even;
+          let neighbors = neighbors_bit[pos & 1];
           for (let ii = 0; ii < neighbors.length; ++ii) {
             let nidx = pos + neighbors[ii];
             if (!land[nidx]) {
@@ -587,7 +593,7 @@ export function main() {
           let next = [];
           for (let ii = 0; ii < todo.length; ++ii) {
             let pos = todo[ii];
-            let neighbors = (pos & 1) ? neighbors_odd : neighbors_even;
+            let neighbors = neighbors_bit[pos & 1];
             for (let jj = 0; jj < neighbors.length; ++jj) {
               let npos = pos + neighbors[jj];
               if (!util[npos]) {
@@ -636,7 +642,8 @@ export function main() {
         let pos = x + y * width;
         fill[pos] = D_INLAND_SEA;
         land[pos] = 0;
-        unfilled_seas.push([pos]);
+        lake_seeds.push(pos);
+        lakes.push(pos);
       }
       for (let ii = 0; ii < use.length; ++ii) {
         placeLake(use[ii][0], use[ii][1]);
@@ -675,6 +682,7 @@ export function main() {
     generateRiverSlope();
 
     let border_min_dist = 0;
+    let ocean_coastlines;
     function growRivers() {
       subopts = opts.river;
       river.fill(0);
@@ -692,7 +700,7 @@ export function main() {
               fill[pos] = D_COASTLINE;
               let invdir = (incoming_dir + 3) % 6;
               river[pos] = 1 << invdir;
-              relev[pos] = 0;
+              relev[pos] = rslope[pos];
               coastlines.push(pos);
               coastlines_incdir.push(invdir);
             }
@@ -706,14 +714,14 @@ export function main() {
             let idx = rand.range(todo.length);
             let pos = todo[idx];
             ridx(todo, idx);
-            let neighbors = (pos & 1) ? neighbors_odd : neighbors_even;
+            let neighbors = neighbors_bit[pos & 1];
             for (let ii = 0; ii < neighbors.length; ++ii) {
               tryMark(pos + neighbors[ii], v, ii);
             }
           }
         }
-        function tryMarkXY(x, y) {
-          tryMark(y * id_factor + x, D_SEA2);
+        function tryMarkXY(x, y, v) {
+          tryMark(y * id_factor + x, v || D_SEA2);
         }
         tryMarkXY(1, 1);
         tryMarkXY(width - 2, 1);
@@ -725,16 +733,21 @@ export function main() {
           tryMarkXY(pos % width, floor(pos / width));
         }
         spreadSeas(D_SEA2);
+        ocean_coastlines = coastlines.slice(0); // oceans and unfilled seas, not lakes
+        for (let ii = 0; ii < lake_seeds.length; ++ii) {
+          let pos = lake_seeds[ii];
+          tryMarkXY(pos % width, floor(pos / width), D_LAKE);
+        }
+        spreadSeas(D_LAKE);
       }
       findCandidates();
 
-      function generateDF() {
+      function findBorderMinDist() {
         util.fill(0);
         let todo = coastlines;
         let d = 0;
         for (let ii = 0; ii < todo.length; ++ii) {
           let pos = todo[ii];
-          coast_distance[pos] = d;
           util[pos] = 1;
         }
         while (todo.length) {
@@ -742,16 +755,14 @@ export function main() {
           let next = [];
           for (let ii = 0; ii < todo.length; ++ii) {
             let pos = todo[ii];
-            let neighbors = (pos & 1) ? neighbors_odd : neighbors_even;
+            let neighbors = neighbors_bit[pos & 1];
             for (let jj = 0; jj < neighbors.length; ++jj) {
               let npos = pos + neighbors[jj];
-              if (!util[npos]) {
+              if (!util[npos] && !land[npos]) {
                 util[npos] = 1;
-                coast_distance[npos] = d;
                 if (fill[npos] === D_BORDER) {
-                  if (!border_min_dist) {
-                    border_min_dist = d;
-                  }
+                  border_min_dist = d;
+                  return;
                 } else {
                   next.push(npos);
                 }
@@ -760,10 +771,8 @@ export function main() {
           }
           todo = next;
         }
-        coast_distance[0] = coast_distance[1] + 1;
-        coast_distance[total_size - 1] = coast_distance[total_size - 2] + 1;
       }
-      generateDF();
+      findBorderMinDist();
 
       if (modes.view < 3) {
         return;
@@ -773,7 +782,7 @@ export function main() {
       function filterCoastalRivers() {
         let rank = [[],[],[]];
         coastlines.forEach(function (pos) {
-          let neighbors = (pos & 1) ? neighbors_odd : neighbors_even;
+          let neighbors = neighbors_bit[pos & 1];
           let open_count = 0;
           let open_bits = 0;
           for (let ii = 0; ii < neighbors.length; ++ii) {
@@ -827,7 +836,7 @@ export function main() {
               continue;
             }
             coastlines.push(pos);
-            let neighbors = (pos & 1) ? neighbors_odd : neighbors_even;
+            let neighbors = neighbors_bit[pos & 1];
             for (let kk = 0; kk < neighbors.length; ++kk) {
               let npos = pos + neighbors[kk];
               blocked[npos] = true;
@@ -893,7 +902,7 @@ export function main() {
         function validGrowth(frompos, topos) {
           // Not too high relative to neighbors?
           let new_elev = relev[frompos] + rslope[topos];
-          let neighbors = (topos & 1) ? neighbors_odd : neighbors_even;
+          let neighbors = neighbors_bit[topos & 1];
           for (let ii = 0; ii < neighbors.length; ++ii) {
             let npos = topos + neighbors[ii];
             if (river[npos]) {
@@ -911,7 +920,7 @@ export function main() {
             break;
           }
           // Check all 6 neighbors, find any that are expandable
-          let neighbors = (pos & 1) ? neighbors_odd : neighbors_even;
+          let neighbors = neighbors_bit[pos & 1];
           let options = [];
           let cur_bits = river[pos];
           let bad_bits = cur_bits | cur_bits << 1 | cur_bits >> 1 | cur_bits >> 5 | cur_bits << 5;
@@ -986,7 +995,7 @@ export function main() {
           if (!out.length) {
             s = 1;
           } else {
-            let neighbors = (pos & 1) ? neighbors_odd : neighbors_even;
+            let neighbors = neighbors_bit[pos & 1];
             if (out.length === 1) {
               s = fillStrahler(pos + neighbors[out[0]], (out[0] + 3) % 6);
             } else {
@@ -1015,7 +1024,7 @@ export function main() {
             river[pos] = 0;
             rstrahler[pos] = 0;
             relev[pos] = 0;
-            let neighbors = (pos & 1) ? neighbors_odd : neighbors_even;
+            let neighbors = neighbors_bit[pos & 1];
             for (let ii = 0; ii < 6; ++ii) {
               if (bits & (1 << ii)) {
                 let npos = pos + neighbors[ii];
@@ -1044,7 +1053,7 @@ export function main() {
           let next_nodes = [];
           for (let ii = 0; ii < work_nodes.length; ++ii) {
             let pos = work_nodes[ii];
-            let neighbors = (pos & 1) ? neighbors_odd : neighbors_even;
+            let neighbors = neighbors_bit[pos & 1];
             let nheight = relev[pos] + tslope[pos];
             for (let jj = 0; jj < neighbors.length; ++jj) {
               let npos = pos + neighbors[jj];
@@ -1071,6 +1080,84 @@ export function main() {
     }
     growRivers();
 
+    function generateOceanDF() {
+      util.fill(0);
+      let todo = ocean_coastlines;
+      let d = 0;
+      for (let ii = 0; ii < todo.length; ++ii) {
+        let pos = todo[ii];
+        ocean_distance[pos] = d;
+        util[pos] = 1;
+      }
+      while (todo.length) {
+        d = min(d + 1, 255);
+        let next = [];
+        for (let ii = 0; ii < todo.length; ++ii) {
+          let pos = todo[ii];
+          let neighbors = neighbors_bit[pos & 1];
+          for (let jj = 0; jj < neighbors.length; ++jj) {
+            let npos = pos + neighbors[jj];
+            if (!util[npos]) {
+              util[npos] = 1;
+              ocean_distance[npos] = d;
+              if (fill[npos] !== D_BORDER) {
+                next.push(npos);
+              }
+            }
+          }
+        }
+        todo = next;
+      }
+      ocean_distance[0] = min(ocean_distance[1] + 1, 255);
+      ocean_distance[total_size - 1] = min(ocean_distance[total_size - 2] + 1, 255);
+    }
+
+    function generateOcean() {
+      initNoise(opts.ocean);
+      for (let jj = 0; jj < height; ++jj) {
+        for (let ii = 0; ii < width; ++ii) {
+          let pos = jj * width + ii;
+          if (fill[pos] === D_SEA2 || fill[pos] === D_BORDER) {
+            hexPosToUnifPos(ii, jj);
+
+            let noise_v = sample();
+            let distance = clamp(ocean_distance[pos] / border_min_dist, 0, 1);
+            let noise_weight = (0.5 - abs(distance - 0.5));
+            distance -= noise_v * noise_weight;
+            relev[pos] = clamp(distance * 255, 0, 255);
+          }
+        }
+      }
+    }
+
+    function generateOutput() {
+      // let max_depth = 0; // always 255
+      // let max_height = 0;
+      // Empirical estimate on 256x256 texture, before mountainifying
+      let est_max_output = opts.rslope.steps * 50 + 80;
+      // covert to a height in quarter-voxels for output
+      let qu_voxel_scale = 1 / est_max_output * opts.output.land_range / 2;
+      // for (let pos = 0; pos < total_size; ++pos) {
+      //   let e = relev[pos];
+      //   if (land[pos]) {
+      //     max_height = max(max_height, e);
+      //   } else {
+      //     max_depth = max(max_depth, e);
+      //   }
+      // }
+      let above_sea_level = opts.output.sea_range;
+      for (let pos = 0; pos < total_size; ++pos) {
+        let e = relev[pos];
+        if (land[pos]) {
+          e = above_sea_level + e * qu_voxel_scale; // (e / max_height) * opts.output.land_range;
+        } else {
+          e = above_sea_level - 1 - e / 255 * above_sea_level;
+        }
+        relev[pos] = max(0, round(e));
+      }
+      water_level.fill(0);
+    }
+
     function blurExtremeSlopes() {
       subopts = opts.blur;
       let { threshold, weight } = subopts;
@@ -1080,7 +1167,7 @@ export function main() {
           continue;
         }
         let elev = relev[pos];
-        let neighbors = (pos & 1) ? neighbors_odd : neighbors_even;
+        let neighbors = neighbors_bit[pos & 1];
         let blur = false;
         for (let ii = 0; ii < neighbors.length; ++ii) {
           let nidx = pos + neighbors[ii];
@@ -1103,6 +1190,164 @@ export function main() {
         let b = blurs[ii];
         relev[b[0]] = b[1];
       }
+    }
+
+    let lake_fills = [];
+    function fillLakes() { // Happens much later than generateLakes - after river growing!
+      util.fill(0);
+      function fillLake(source_pos) {
+        let cur_elev = relev[source_pos];
+        util[source_pos] = 1;
+        let neighbors_by_elev = []; // neighbors of distance 1, sorted by elevation
+        let n2 = {}; // neighbors of a distance 2
+        let filled = [];
+        let try_elev = cur_elev;
+        let good_elevations = [];
+        function addPos(pos) {
+          filled.push(pos);
+          let neighbors = neighbors_bit[pos & 1];
+          for (let jj = 0; jj < neighbors.length; ++jj) {
+            let nidx = pos + neighbors[jj];
+            if (!util[nidx]) {
+              let nelev = relev[nidx];
+              if (nelev < try_elev) {
+                return false;
+              }
+              let ne = neighbors_by_elev[nelev];
+              if (!ne) {
+                ne = neighbors_by_elev[nelev] = [];
+              }
+              ne.push(nidx);
+              util[nidx] = 1;
+
+              // Also remove from N2
+              delete n2[nidx];
+              // Also add our neighbors to N2
+              let neighbors2 = neighbors_bit[nidx & 1];
+              for (let kk = 0; kk < neighbors2.length; ++kk) {
+                let nidx2 = nidx + neighbors2[kk];
+                if (!util[nidx2] && !n2[nidx2]) {
+                  n2[nidx2] = relev[nidx2];
+                }
+              }
+            }
+          }
+          return true;
+        }
+        if (!addPos(source_pos)) {
+          return;
+        }
+        // try increasing water elevation
+        outer:
+        do {
+          ++try_elev;
+          let ne = neighbors_by_elev[try_elev];
+          let filled_len = filled.length;
+          if (ne) {
+            for (let ii = 0; ii < ne.length; ++ii) { // grows while iterating
+              if (!addPos(ne[ii])) {
+                filled.length = filled_len;
+                break outer;
+              }
+            }
+            // This elevation is lower than all immediate neighbors
+            // This is a good elevation if it is lower than everyone in N2
+            let is_good = true;
+            for (let key in n2) {
+              if (n2[key] <= try_elev) {
+                is_good = false;
+                break;
+              }
+            }
+            if (is_good) {
+              cur_elev = try_elev;
+              good_elevations.push([cur_elev, filled.length]);
+            }
+          }
+        } while (true);
+        if (!good_elevations.length) {
+          return;
+        }
+        // Aribitrary grab the elevation found halfway though the flooding process
+        let pick = floor(good_elevations.length * 0.5);
+        pick = good_elevations[pick];
+        filled.length = pick[1];
+        cur_elev = pick[0] + 1;
+        for (let ii = 0; ii < filled.length; ++ii) {
+          let pos = filled[ii];
+          water_level[pos] = cur_elev;
+          land[pos] = 0;
+        }
+        lake_fills.push(filled);
+        // Also spread sea level to neighboring hexomes
+        for (let ii in neighbors_by_elev) {
+          let elev = Number(ii);
+          if (elev > cur_elev) {
+            let ne = neighbors_by_elev[elev];
+            for (let jj = 0; jj < ne.length; ++jj) {
+              water_level[ne[jj]] = cur_elev;
+            }
+          }
+        }
+      }
+      for (let ii = 0; ii < lakes.length; ++ii) {
+        fillLake(lakes[ii]);
+      }
+    }
+
+
+    function generateCoastDF() {
+      util.fill(0);
+      function findCoast() {
+        let default_water_level = opts.output.sea_range;
+        let coast = [];
+        for (let ii = 0; ii < total_size; ++ii) {
+          if (relev[ii] >= (water_level[ii] || default_water_level)) {
+            // it's land
+            let neighbors = neighbors_bit[ii & 1];
+            let is_coast = false;
+            for (let jj = 0; jj < neighbors.length; ++jj) {
+              let nid = ii + neighbors[jj];
+              if (relev[nid] < (water_level[nid] || default_water_level)) {
+                is_coast = true;
+                break;
+              }
+            }
+            if (is_coast) {
+              coast.push(ii);
+            }
+          }
+        }
+        return coast;
+      }
+      let todo = findCoast();
+      let d = 0;
+      for (let ii = 0; ii < todo.length; ++ii) {
+        let pos = todo[ii];
+        coast_distance[pos] = d;
+        util[pos] = 1;
+      }
+      while (todo.length) {
+        d = min(d + 1, 255);
+        let next = [];
+        for (let ii = 0; ii < todo.length; ++ii) {
+          let pos = todo[ii];
+          let neighbors = neighbors_bit[pos & 1];
+          for (let jj = 0; jj < neighbors.length; ++jj) {
+            let npos = pos + neighbors[jj];
+            if (!util[npos]) {
+              util[npos] = 1;
+              coast_distance[npos] = d;
+              if (fill[npos] !== D_BORDER) {
+                next.push(npos);
+              }
+            }
+          }
+        }
+        todo = next;
+      }
+      coast_distance[0] = min(coast_distance[1] + 1, 255);
+      coast_distance[total_size - 1] = min(coast_distance[total_size - 2] + 1, 255);
     }
 
     function mountainify() {
@@ -1251,52 +1496,12 @@ export function main() {
       applyGrowth();
     }
 
-    function generateOcean() {
-      initNoise(opts.ocean);
-      for (let jj = 0; jj < height; ++jj) {
-        for (let ii = 0; ii < width; ++ii) {
-          let pos = jj * width + ii;
-          if (!land[pos]) {
-            hexPosToUnifPos(ii, jj);
-
-            let noise_v = sample();
-            let distance = clamp(coast_distance[pos] / border_min_dist, 0, 1);
-            let noise_weight = (0.5 - abs(distance - 0.5));
-            distance -= noise_v * noise_weight;
-            relev[pos] = clamp(distance * 255, 0, 255);
-          }
-        }
-      }
-    }
+    generateOceanDF();
     generateOcean();
-
-    function generateOutput() {
-      // let max_depth = 0; // always 255
-      // let max_height = 0;
-      // Empirical estimate on 256x256 texture, before mountainifying
-      let est_max_output = opts.rslope.steps * 50 + 80;
-      // covert to a height in quarter-voxels for output
-      let qu_voxel_scale = 1 / est_max_output * opts.output.land_range / 2;
-      // for (let pos = 0; pos < total_size; ++pos) {
-      //   let e = relev[pos];
-      //   if (land[pos]) {
-      //     max_height = max(max_height, e);
-      //   } else {
-      //     max_depth = max(max_depth, e);
-      //   }
-      // }
-      for (let pos = 0; pos < total_size; ++pos) {
-        let e = relev[pos];
-        if (land[pos]) {
-          e = opts.output.sea_range + e * qu_voxel_scale; // (e / max_height) * opts.output.land_range;
-        } else {
-          e = opts.output.sea_range - 1 - e / 255 * opts.output.sea_range;
-        }
-        relev[pos] = max(0, round(e));
-      }
-    }
     generateOutput();
     blurExtremeSlopes();
+    fillLakes();
+    generateCoastDF(); // includes lakes
     mountainify();
 
     let total_range = opts.output.land_range; // + opts.output.sea_range; - sea isn't used for slope, for the most part
@@ -1311,7 +1516,7 @@ export function main() {
               // let noise_v = sample();
               let elev = relev[pos];
               let right_slope = 0; // if positive, slopes down to the right
-              let neighbors = (x & 1) ? neighbors_odd : neighbors_even;
+              let neighbors = neighbors_bit[x & 1];
               for (let ii = 1; ii < 6; ++ii) {
                 if (ii === 3) {
                   continue;
@@ -1340,7 +1545,7 @@ export function main() {
           for (let x = 0; x < width; ++x) {
             let pos = y * width + x;
             if (land[pos]) {
-              let neighbors = (x & 1) ? neighbors_odd : neighbors_even;
+              let neighbors = neighbors_bit[x & 1];
               let total = humidity[pos];
               let count = 1;
               for (let ii = 1; ii < 6; ++ii) {
@@ -1415,13 +1620,13 @@ export function main() {
           // let has_river = is_land && river[pos];
           let humid = humidity[pos] / 255;
           // let slope = tslope[pos]; // Use actual calculated abs(max?) of slope from elev?
-          let cdist = coast_distance[pos] / (hex_tex_size * 2);
+          let cdist = ocean_distance[pos] / (hex_tex_size * 2);
           let choice = rand.random();
 
           // calc actual slope
           let tot_slope = 0;
           //let max_slope = 0;
-          let neighbors = (x & 1) ? neighbors_odd : neighbors_even;
+          let neighbors = neighbors_bit[x & 1];
           for (let ii = 0; ii < 6; ++ii) {
             let npos = pos + neighbors[ii];
             let nelev = (relev[npos] - opts.output.sea_range) / opts.output.land_range;
@@ -1454,7 +1659,7 @@ export function main() {
         opts.river.show_elev ?
           (relev[ii] - opts.output.sea_range) / opts.output.land_range :
           0 :
-        relev[ii] / opts.output.sea_range) * 255;
+        relev[ii] / (water_level[ii] || opts.output.sea_range)) * 255;
       tex_data2[ii*4+2] = rstrahler[ii];
       tex_data2[ii*4+3] = humidity[ii];
     }
@@ -1515,6 +1720,7 @@ export function main() {
     lines.push(`  elev: new Uint16Array([${relev}]),`);
     lines.push(`  humidity: new Uint8Array([${humidity}]),`);
     lines.push(`  river: new Uint8Array([${river}]),`);
+    lines.push(`  water_level: new Uint16Array([${water_level}]),`);
     lines.push('};\n');
     net.client.send('export', lines.join('\n'));
   }
@@ -1620,7 +1826,7 @@ export function main() {
           y += ui.font_height;
           ui.print(style_labels, x, y, z, `Humidity: ${humidity[idx]}`);
           y += ui.font_height;
-          ui.print(style_labels, x, y, z, `Cost Distance: ${coast_distance[idx]}`);
+          ui.print(style_labels, x, y, z, `Coast Distance: ${coast_distance[idx]} / ${ocean_distance[idx]}`);
           y += ui.font_height;
           let rbits = river[idx];
           ui.print(style_labels, x, y, z, `River: ${rbits&1?'Up':'  '} ${rbits&2?'UR':'  '} ` +
