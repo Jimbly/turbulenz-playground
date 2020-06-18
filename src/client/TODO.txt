@@ -1,5 +1,3 @@
-Want center of ocean hexome to be just barely under water level usually
-
 Try generating mountains/hills/plains hint for biome type selection (just in playground for now)
 
 

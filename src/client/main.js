@@ -1158,6 +1158,32 @@ export function main() {
       water_level.fill(0);
     }
 
+    function fixupCoastalWaters() {
+      // Hack: use average slope to calc depth of hexomes bordering coast, instead of noise
+      let above_sea_level = opts.output.sea_range;
+      for (let pos = 0; pos < total_size; ++pos) {
+        if (fill[pos] === D_SEA2) {
+          let land_count = 0;
+          //let elev_sum = 0;
+          let elev_min = Infinity;
+          let neighbors = neighbors_bit[pos & 1];
+          for (let kk = 0; kk < neighbors.length; ++kk) {
+            let nidx = pos + neighbors[kk];
+            if (land[nidx]) {
+              ++land_count;
+              let delev = relev[nidx] - above_sea_level;
+              //elev_sum += delev;
+              elev_min = min(elev_min, delev);
+            }
+          }
+          if (land_count) {
+            //relev[pos] = max(relev[pos], above_sea_level - max(elev_sum / land_count, 1));
+            relev[pos] = max(relev[pos], above_sea_level - max(elev_min, 1));
+          }
+        }
+      }
+    }
+
     function blurExtremeSlopes() {
       subopts = opts.blur;
       let { threshold, weight } = subopts;
@@ -1499,6 +1525,7 @@ export function main() {
     generateOceanDF();
     generateOcean();
     generateOutput();
+    fixupCoastalWaters();
     blurExtremeSlopes();
     fillLakes();
     generateCoastDF(); // includes lakes
