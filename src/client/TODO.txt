@@ -1,18 +1,8 @@
 Try generating mountains/hills/plains hint for biome type selection (just in playground for now)
 
 
-Raise water level around lakes
-  Can do an efficient fill to determine highest possible level and take some percentage of that?
-  How do we communicate this to the game?  Separate water level array?  List of levels and we index into it somehow? List of center points and levels and client does a relatively efficient fill upon load?
-  Separate sea level array would RLE compress *really* well - could even RLE compress identical rows
-
-
-Need to use slope near the coast to decide the initial depth of the ocean next to it, or things interpolate poorly
-
 Add Uniformish, interesting low-level noise for base sea level elevation on edges (low 25%?) that we can blend to regardless of interior sea level choices
-
-Detect perfectly flat islands and do something more interesting - island biome with local gen?
-  Or, anything that is elev === 0 but is not a river, should be increased by tslope
+  Have sea level edge and current noise be at ~8k, so it can go super deep later where needed, and there's not as much dynamic to the near-coastal noise
 
 Add some chance for rivers to start at non-0 elevation so we get waterfalls into the ocean / lakes
 

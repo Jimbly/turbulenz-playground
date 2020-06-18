@@ -1130,13 +1130,14 @@ export function main() {
       }
     }
 
+    let voxel_scale;
     function generateOutput() {
       // let max_depth = 0; // always 255
       // let max_height = 0;
       // Empirical estimate on 256x256 texture, before mountainifying
       let est_max_output = opts.rslope.steps * 50 + 80;
       // covert to a height in quarter-voxels for output
-      let qu_voxel_scale = 1 / est_max_output * opts.output.land_range / 2;
+      voxel_scale = 1 / est_max_output * opts.output.land_range / 2;
       // for (let pos = 0; pos < total_size; ++pos) {
       //   let e = relev[pos];
       //   if (land[pos]) {
@@ -1149,7 +1150,7 @@ export function main() {
       for (let pos = 0; pos < total_size; ++pos) {
         let e = relev[pos];
         if (land[pos]) {
-          e = above_sea_level + e * qu_voxel_scale; // (e / max_height) * opts.output.land_range;
+          e = above_sea_level + e * voxel_scale; // (e / max_height) * opts.output.land_range;
         } else {
           e = above_sea_level - 1 - e / 255 * above_sea_level;
         }
@@ -1180,6 +1181,12 @@ export function main() {
             //relev[pos] = max(relev[pos], above_sea_level - max(elev_sum / land_count, 1));
             relev[pos] = max(relev[pos], above_sea_level - max(elev_min, 1));
           }
+        }
+      }
+      // Hack: any land that is level with the water, raise up a bit so it blends well
+      for (let pos = 0; pos < total_size; ++pos) {
+        if (relev[pos] === above_sea_level && !river[pos]) {
+          relev[pos] = above_sea_level + min(rslope[pos], tslope[pos]) * voxel_scale * 0.5;
         }
       }
     }
