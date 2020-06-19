@@ -71,7 +71,7 @@ export function main() {
   shaders.addGlobal('hex_param', hex_param);
 
   let modes = {
-    view: 5,
+    view: 3,
     edit: 10,
   };
 
@@ -180,9 +180,9 @@ export function main() {
       blur_w: 10,
     },
     output: {
-      sea_range_exp: 14,
+      sea_range_exp: 13,
       land_range_exp: 14,
-      sea_range: 1 << 14,
+      sea_range: 1 << 13,
       land_range: 1 << 14,
     },
   };
