@@ -7,7 +7,7 @@ const { getBiomeV2 } = require('./biome_test.js');
 const camera2d = require('./glov/camera2d.js');
 const engine = require('./glov/engine.js');
 const input = require('./glov/input.js');
-const { abs, atan2, ceil, cos, max, min, floor, round, pow, sin, sqrt, PI } = Math;
+const { abs, atan2, ceil, cos, exp, max, min, floor, round, pow, sin, sqrt, PI } = Math;
 const net = require('./glov/net.js');
 const { randCreate } = require('./glov/rand_alea.js');
 const shaders = require('./glov/shaders.js');
@@ -18,6 +18,7 @@ const ui = require('./glov/ui.js');
 const { clamp, lerp, ridx } = require('../common/util.js');
 const {
   vec2, v2copy, v2lengthSq, v2mul, v2sub,
+  v3set,
   vec4,
 } = require('./glov/vmath.js');
 
@@ -70,8 +71,8 @@ export function main() {
   shaders.addGlobal('hex_param', hex_param);
 
   let modes = {
-    view: 3,
-    edit: 8,
+    view: 6,
+    edit: 10,
   };
 
   let debug_tex1;
@@ -172,6 +173,15 @@ export function main() {
       rainshadow: 0.4,
       show_relief: false,
     },
+    slope_vis: {
+      mode: 2,
+      scale: 5,
+      cut1: 0.033,
+      cut2: 0.666,
+      blur_scale: 680,
+      steps: 1,
+      blur_w: 10,
+    },
     output: {
       sea_range_exp: 14,
       land_range_exp: 14,
@@ -193,6 +203,10 @@ export function main() {
   let coast_distance = new Uint8Array(tex_total_size);
   let ocean_distance = new Uint8Array(tex_total_size);
   let humidity = new Uint8Array(tex_total_size);
+  let slope_vis1 = new Uint8Array(tex_total_size);
+  let slope_vis2 = new Uint8Array(tex_total_size);
+  let blur_temp1 = new Uint32Array(tex_total_size);
+  let blur_temp2 = new Uint32Array(tex_total_size);
   let tex_data1 = new Uint8Array(tex_total_size * 4);
   let tex_data2 = new Uint8Array(tex_total_size * 4);
   let tex_data_color = new Uint8Array(tex_total_size * 4);
@@ -1643,6 +1657,184 @@ export function main() {
     }
     scaleTSlope();
 
+    function visualizeSlope() {
+
+      subopts = opts.slope_vis;
+      let { cut1, cut2, blur_scale, scale, steps, mode, blur_w } = subopts;
+      let color = vec4(0,0,0,1);
+      let buf1 = slope_vis1;
+      let buf2 = slope_vis2;
+      for (let pos = 0; pos < total_size; ++pos) {
+        let elev = (relev[pos] - opts.output.sea_range) / opts.output.land_range;
+
+        // calc actual slope
+        let tot_slope = 0;
+        //let max_slope = 0;
+        let neighbors = neighbors_bit[pos & 1];
+        for (let ii = 0; ii < 6; ++ii) {
+          let npos = pos + neighbors[ii];
+          let nelev = (relev[npos] - opts.output.sea_range) / opts.output.land_range;
+          let slope = abs(elev - nelev);
+          tot_slope += slope;
+          //max_slope = max(max_slope, slope);
+        }
+
+        let v = clamp(tot_slope * scale, 0, 1); // x3.5 = empirically roughly 0-1
+        if (mode === 1) {
+          buf1[pos] = v > cut2 ? 2 : v > cut1 ? 1 : 0;
+        }
+
+        if (mode === 0) {
+          let r = 0;
+          let g = 0;
+          let b = 0;
+          // Color gradient
+          // v *= 4;
+          // if (v > 3) { // yellow -> red
+          //   v -= 3;
+          //   r = 1;
+          //   g = 1 - v;
+          // } else if (v > 2) { // green -> yellow
+          //   v -= 2;
+          //   r = v;
+          //   g = 1;
+          // } else if (v > 1) { // cyan -> green
+          //   v -= 1;
+          //   g = 1;
+          //   b = 1 - v;
+          // } else { // blue -> cyan
+          //   g = v;
+          //   b = 1;
+          // }
+          if (v > cut2) { // yellow -> red
+            v = (v - cut2) / (1 - cut2);
+            r = 1;
+            g = 0.5 - v * 0.5;
+          } else if (v > cut1) { // green -> yellow
+            v = (v - cut1) / (cut2 - cut1);
+            g = 1;
+            r = v * 0.5;
+          } else { // blue -> cyan
+            v /= cut1;
+            g = v * 0.5;
+            b = 1;
+          }
+
+          v3set(color, clamp(r * 255, 0, 255), clamp(g * 255, 0, 255), clamp(b * 255, 0, 255));
+
+          for (let jj = 0; jj < 4; ++jj) {
+            tex_data_color[pos * 4 + jj] = color[jj];
+          }
+        }
+      }
+
+      let ncount = new Uint8Array(3);
+      function stepCellular() {
+        // buf1 -> buf2
+        for (let pos = 0; pos < total_size; ++pos) {
+          let v = buf1[pos];
+          ncount.fill(0);
+          let neighbors = neighbors_bit[pos & 1];
+          for (let ii = 0; ii < 6; ++ii) {
+            let npos = pos + neighbors[ii];
+            ncount[buf1[npos]]++;
+          }
+
+          // TODO: something smarter over water <-> land boundaries
+
+          // If 4 or more of any neighbor, fill with that one
+          for (let ii = 0; ii < 3; ++ii) {
+            if (ncount[ii] >= 4) {
+              v = ii;
+            }
+          }
+          if (ncount[v] <= 1) {
+            // If 0 or 1 neighbors, fill with most common neighbor
+            for (let ii = 0; ii < 3; ++ii) {
+              if (ncount[ii] > ncount[v]) {
+                v = ii;
+              }
+            }
+          }
+
+          buf2[pos] = v;
+        }
+      }
+      if (mode === 1) { // cellular automata
+        for (let ii = 0; ii < steps; ++ii) {
+          stepCellular();
+          if (buf1 === slope_vis1) {
+            buf1 = slope_vis2;
+            buf2 = slope_vis1;
+          } else {
+            buf1 = slope_vis1;
+            buf2 = slope_vis2;
+          }
+        }
+
+        for (let pos = 0; pos < total_size; ++pos) {
+          let v = buf1[pos];
+          v3set(color, v ? 255 : 0, v < 2 ? 255 : 0, 0);
+
+          for (let jj = 0; jj < 4; ++jj) {
+            tex_data_color[pos * 4 + jj] = color[jj];
+          }
+        }
+      }
+
+      function blurHeight() {
+        let w_len = blur_w * 2 + 1;
+        let w = 1 / w_len;
+
+        let h_min = opts.output.sea_range;
+
+        // Horizontal blur
+        for (let yy = 0; yy < height; ++yy) {
+          for (let xx = 0; xx <= width - w_len; ++xx) {
+            let pos = xx + yy * width;
+            let v = 0;
+            for (let dx = 0; dx < w_len; ++dx) {
+              v += max(h_min, relev[pos + dx]);
+            }
+            blur_temp1[pos + blur_w] = round(v * w);
+          }
+        }
+        // Vertical blur
+        for (let yy = 0; yy < height - w_len; ++yy) {
+          for (let xx = blur_w; xx <= width - blur_w; ++xx) {
+            let pos = xx + yy * width;
+            let v = 0;
+            for (let dy = 0; dy < w_len; ++dy) {
+              v += blur_temp1[pos + dy * width];
+            }
+            blur_temp2[pos + blur_w * width] = round(v * w);
+          }
+        }
+      }
+      function calcDiff() {
+        for (let pos = 0; pos < total_size; ++pos) {
+          let elev = relev[pos];
+          let blurred = blur_temp2[pos] || elev;
+          let diff = elev - blurred;
+          let v = diff / blur_scale;
+          v = v > cut2 ? 2 : v > cut1 ? 1 : 0;
+          v3set(color, v ? 255 : 0, v < 2 ? 255 : 0, 0);
+
+          for (let jj = 0; jj < 4; ++jj) {
+            tex_data_color[pos * 4 + jj] = color[jj];
+          }
+        }
+      }
+      if (mode === 2) {
+        blurHeight();
+        calcDiff();
+      }
+    }
+    if (modes.view === 6) {
+      visualizeSlope();
+    }
+
+
     function calculateBiomesTest() {
       // This will not be in output, just simulating what the game will do with this data when it gets it
 
@@ -1862,6 +2054,10 @@ export function main() {
           y += ui.font_height;
           ui.print(style_labels, x, y, z, `Coast Distance: ${coast_distance[idx]} / ${ocean_distance[idx]}`);
           y += ui.font_height;
+          ui.print(style_labels, x, y, z, `blur_temp1: ${blur_temp1[idx] - opts.output.sea_range}`);
+          y += ui.font_height;
+          ui.print(style_labels, x, y, z, `blur_temp2: ${blur_temp2[idx] - opts.output.sea_range}`);
+          y += ui.font_height;
           let rbits = river[idx];
           ui.print(style_labels, x, y, z, `River: ${rbits&1?'Up':'  '} ${rbits&2?'UR':'  '} ` +
             `${rbits&4?'LR':'  '} ${rbits&8?'Dn':'  '} ${rbits&16?'LL':'  '} ${rbits&32?'UL':'  '}`);
@@ -1969,6 +2165,7 @@ export function main() {
     y += button_spacing;
     x = x0 + 25;
     modeButton('view', 'humid', 4);
+    modeButton('view', 'slope', 6);
     modeButton('view', 'biomes', 5);
     y += button_spacing;
     x = x0;
@@ -1987,6 +2184,7 @@ export function main() {
     y += button_spacing;
     x = x0 + 25;
     modeButton('edit', 'ocean', 5);
+    modeButton('edit', 'slope', 10);
     modeButton('edit', 'output', 6);
     y += button_spacing;
     x = x0;
@@ -2099,6 +2297,15 @@ export function main() {
       subopts = opts.blur;
       slider('threshold', 1, 2000, 0);
       slider('weight', 0, 1, 2);
+    } else if (modes.edit === 10) {
+      subopts = opts.slope_vis;
+      slider('mode', 0, 2, 0);
+      slider('scale', 0, 20, 2);
+      slider('cut1', 0, 1, 3);
+      slider('cut2', 0, 1, 3);
+      slider('steps', 0, 10, 0);
+      slider('blur_w', 1, 10, 0);
+      slider('blur_scale', 0, 1000, 0);
     }
     hex_param[2] = opts.rslope.steps;
   }
