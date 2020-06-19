@@ -184,9 +184,6 @@ void main(void) {
     }
   } else if (mode == 6.0) {
     color = tex_color.rgb;
-    if (land == 0.0) {
-      color.rgb *= 0.25;
-    }
   }
   if (ix < 0.0 || ix >= hex_param.x || iy < 0.0 || iy >= hex_param.x) {
     alpha = 0.0;

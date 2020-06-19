@@ -1,4 +1,9 @@
-const { min } = Math;
+const assert = require('assert');
+
+const C_WATER = 0;
+const C_PLAINS = 1;
+const C_HILLS = 2;
+const C_MOUNTAINS = 3;
 
 function rgb(r,g,b) {
   return new Uint8Array([r, g, b, 255]);
@@ -89,35 +94,29 @@ export function getBiomeV1(is_land, elev, humidity, choice) {
   }
 }
 
-export function getBiomeV2(is_land, tot_slope, elev, humidity, choice, cdist) {
-  if (!is_land) {
+export function getBiomeV2(classif, tot_slope, elev, humidity, choice, cdist) {
+  if (classif === C_WATER) {
     return OCEAN;
   }
   tot_slope *= 4;
-  elev *= 4;
   let is_cliff = tot_slope > 0.6;
   if (is_cliff) {
     return CLIFFS;
   }
-  let mountain_cutoff = (0.30 + min(cdist / 0.1, 1) * 0.15);
-  if (elev > mountain_cutoff) {
+  if (classif === C_MOUNTAINS) {
     if (tot_slope > 0.1) {
       return MOUNTAINS;
     } else {
       return TUNDRA;
     }
   }
-  if (elev > mountain_cutoff / 2) {
-    if (humidity > 0.75) {
-      return MOUNTAINS;
-    } else if (humidity > 0.5) {
+  if (classif === C_HILLS) {
+    if (humidity > 0.66) {
       return HILLS_FOREST;
-    } else if (humidity > 0.25) {
-      return HILLS;
     } else {
-      return PLAINS;
+      return HILLS;
     }
-  } else {
+  } else if (classif === C_PLAINS) {
     if (humidity > 0.75) {
       return weightedChoiceGet(choice_elev0_hum75, choice);
     } else if (humidity > 0.5) {
@@ -127,5 +126,7 @@ export function getBiomeV2(is_land, tot_slope, elev, humidity, choice, cdist) {
     } else {
       return DESERT;
     }
+  } else {
+    return assert(0);
   }
 }

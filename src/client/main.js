@@ -7,7 +7,7 @@ const { getBiomeV2 } = require('./biome_test.js');
 const camera2d = require('./glov/camera2d.js');
 const engine = require('./glov/engine.js');
 const input = require('./glov/input.js');
-const { abs, atan2, ceil, cos, exp, max, min, floor, round, pow, sin, sqrt, PI } = Math;
+const { abs, atan2, ceil, cos, max, min, floor, round, pow, sin, sqrt, PI } = Math;
 const net = require('./glov/net.js');
 const { randCreate } = require('./glov/rand_alea.js');
 const shaders = require('./glov/shaders.js');
@@ -71,7 +71,7 @@ export function main() {
   shaders.addGlobal('hex_param', hex_param);
 
   let modes = {
-    view: 6,
+    view: 5,
     edit: 10,
   };
 
@@ -170,16 +170,13 @@ export function main() {
       domain_warp: 0,
       warp_freq: 1,
       warp_amp: 1,
-      rainshadow: 0.4,
+      rainshadow: 0.75,
       show_relief: false,
     },
-    slope_vis: {
-      mode: 2,
-      scale: 5,
+    classif: {
       cut1: 0.033,
       cut2: 0.666,
       blur_scale: 680,
-      steps: 1,
       blur_w: 10,
     },
     output: {
@@ -203,8 +200,7 @@ export function main() {
   let coast_distance = new Uint8Array(tex_total_size);
   let ocean_distance = new Uint8Array(tex_total_size);
   let humidity = new Uint8Array(tex_total_size);
-  let slope_vis1 = new Uint8Array(tex_total_size);
-  let slope_vis2 = new Uint8Array(tex_total_size);
+  let classif = new Uint8Array(tex_total_size);
   let blur_temp1 = new Uint32Array(tex_total_size);
   let blur_temp2 = new Uint32Array(tex_total_size);
   let tex_data1 = new Uint8Array(tex_total_size * 4);
@@ -295,6 +291,11 @@ export function main() {
     const D_INLAND_SEA = 4;
     const D_COASTLINE = 5;
     const D_LAKE = 6;
+
+    const C_WATER = 0;
+    const C_PLAINS = 1;
+    const C_HILLS = 2;
+    const C_MOUNTAINS = 3;
 
     function shuffleArray(arr) {
       for (let ii = arr.length - 1; ii >= 1; --ii) {
@@ -1657,130 +1658,10 @@ export function main() {
     }
     scaleTSlope();
 
-    function visualizeSlope() {
-
-      subopts = opts.slope_vis;
-      let { cut1, cut2, blur_scale, scale, steps, mode, blur_w } = subopts;
+    function determineClassification() {
+      subopts = opts.classif;
+      let { cut1, cut2, blur_scale, blur_w } = subopts;
       let color = vec4(0,0,0,1);
-      let buf1 = slope_vis1;
-      let buf2 = slope_vis2;
-      for (let pos = 0; pos < total_size; ++pos) {
-        let elev = (relev[pos] - opts.output.sea_range) / opts.output.land_range;
-
-        // calc actual slope
-        let tot_slope = 0;
-        //let max_slope = 0;
-        let neighbors = neighbors_bit[pos & 1];
-        for (let ii = 0; ii < 6; ++ii) {
-          let npos = pos + neighbors[ii];
-          let nelev = (relev[npos] - opts.output.sea_range) / opts.output.land_range;
-          let slope = abs(elev - nelev);
-          tot_slope += slope;
-          //max_slope = max(max_slope, slope);
-        }
-
-        let v = clamp(tot_slope * scale, 0, 1); // x3.5 = empirically roughly 0-1
-        if (mode === 1) {
-          buf1[pos] = v > cut2 ? 2 : v > cut1 ? 1 : 0;
-        }
-
-        if (mode === 0) {
-          let r = 0;
-          let g = 0;
-          let b = 0;
-          // Color gradient
-          // v *= 4;
-          // if (v > 3) { // yellow -> red
-          //   v -= 3;
-          //   r = 1;
-          //   g = 1 - v;
-          // } else if (v > 2) { // green -> yellow
-          //   v -= 2;
-          //   r = v;
-          //   g = 1;
-          // } else if (v > 1) { // cyan -> green
-          //   v -= 1;
-          //   g = 1;
-          //   b = 1 - v;
-          // } else { // blue -> cyan
-          //   g = v;
-          //   b = 1;
-          // }
-          if (v > cut2) { // yellow -> red
-            v = (v - cut2) / (1 - cut2);
-            r = 1;
-            g = 0.5 - v * 0.5;
-          } else if (v > cut1) { // green -> yellow
-            v = (v - cut1) / (cut2 - cut1);
-            g = 1;
-            r = v * 0.5;
-          } else { // blue -> cyan
-            v /= cut1;
-            g = v * 0.5;
-            b = 1;
-          }
-
-          v3set(color, clamp(r * 255, 0, 255), clamp(g * 255, 0, 255), clamp(b * 255, 0, 255));
-
-          for (let jj = 0; jj < 4; ++jj) {
-            tex_data_color[pos * 4 + jj] = color[jj];
-          }
-        }
-      }
-
-      let ncount = new Uint8Array(3);
-      function stepCellular() {
-        // buf1 -> buf2
-        for (let pos = 0; pos < total_size; ++pos) {
-          let v = buf1[pos];
-          ncount.fill(0);
-          let neighbors = neighbors_bit[pos & 1];
-          for (let ii = 0; ii < 6; ++ii) {
-            let npos = pos + neighbors[ii];
-            ncount[buf1[npos]]++;
-          }
-
-          // TODO: something smarter over water <-> land boundaries
-
-          // If 4 or more of any neighbor, fill with that one
-          for (let ii = 0; ii < 3; ++ii) {
-            if (ncount[ii] >= 4) {
-              v = ii;
-            }
-          }
-          if (ncount[v] <= 1) {
-            // If 0 or 1 neighbors, fill with most common neighbor
-            for (let ii = 0; ii < 3; ++ii) {
-              if (ncount[ii] > ncount[v]) {
-                v = ii;
-              }
-            }
-          }
-
-          buf2[pos] = v;
-        }
-      }
-      if (mode === 1) { // cellular automata
-        for (let ii = 0; ii < steps; ++ii) {
-          stepCellular();
-          if (buf1 === slope_vis1) {
-            buf1 = slope_vis2;
-            buf2 = slope_vis1;
-          } else {
-            buf1 = slope_vis1;
-            buf2 = slope_vis2;
-          }
-        }
-
-        for (let pos = 0; pos < total_size; ++pos) {
-          let v = buf1[pos];
-          v3set(color, v ? 255 : 0, v < 2 ? 255 : 0, 0);
-
-          for (let jj = 0; jj < 4; ++jj) {
-            tex_data_color[pos * 4 + jj] = color[jj];
-          }
-        }
-      }
 
       function blurHeight() {
         let w_len = blur_w * 2 + 1;
@@ -1813,27 +1694,32 @@ export function main() {
       }
       function calcDiff() {
         for (let pos = 0; pos < total_size; ++pos) {
-          let elev = relev[pos];
-          let blurred = blur_temp2[pos] || elev;
-          let diff = elev - blurred;
-          let v = diff / blur_scale;
-          v = v > cut2 ? 2 : v > cut1 ? 1 : 0;
-          v3set(color, v ? 255 : 0, v < 2 ? 255 : 0, 0);
+          let c;
+          if (!land[pos]) {
+            c = C_WATER;
+          } else {
+            let elev = relev[pos];
+            let blurred = blur_temp2[pos] || elev;
+            let diff = elev - blurred;
+            let v = diff / blur_scale;
+            c = v > cut2 ? C_MOUNTAINS : v > cut1 ? C_HILLS : C_PLAINS;
+          }
+          classif[pos] = c;
+          v3set(color, c > 1 ? 255 : 0, c && c < 3 ? 255 : 0, c ? 0 : 255);
 
-          for (let jj = 0; jj < 4; ++jj) {
-            tex_data_color[pos * 4 + jj] = color[jj];
+          if (modes.view === 6) {
+            for (let jj = 0; jj < 4; ++jj) {
+              tex_data_color[pos * 4 + jj] = color[jj];
+            }
           }
         }
       }
-      if (mode === 2) {
-        blurHeight();
-        calcDiff();
-      }
+      blurHeight();
+      calcDiff();
+      // Maybe also want a blur / cellular automata pass to remove islands of classification
+      // Maybe want to do stuff to decrease the mountains on the coasts
     }
-    if (modes.view === 6) {
-      visualizeSlope();
-    }
-
+    determineClassification();
 
     function calculateBiomesTest() {
       // This will not be in output, just simulating what the game will do with this data when it gets it
@@ -1841,12 +1727,13 @@ export function main() {
       for (let y = 0; y < height; ++y) {
         for (let x = 0; x < width; ++x) {
           let pos = y * width + x;
-          let is_land = land[pos];
+          //let is_land = land[pos];
           let elev = (relev[pos] - opts.output.sea_range) / opts.output.land_range;
           // let has_river = is_land && river[pos];
           let humid = humidity[pos] / 255;
           // let slope = tslope[pos]; // Use actual calculated abs(max?) of slope from elev?
           let cdist = ocean_distance[pos] / (hex_tex_size * 2);
+          let cat = classif[pos];
           let choice = rand.random();
 
           // calc actual slope
@@ -1861,7 +1748,7 @@ export function main() {
             //max_slope = max(max_slope, slope);
           }
 
-          let color = getBiomeV2(is_land, tot_slope, elev, humid, choice, cdist);
+          let color = getBiomeV2(cat, tot_slope, elev, humid, choice, cdist);
 
           //let color = getBiomeV1(is_land, elev, humid, choice);
           for (let jj = 0; jj < 4; ++jj) {
@@ -1947,6 +1834,7 @@ export function main() {
     lines.push(`  humidity: new Uint8Array([${humidity}]),`);
     lines.push(`  river: new Uint8Array([${river}]),`);
     lines.push(`  water_level: new Uint16Array([${water_level}]),`);
+    lines.push(`  classif: new Uint8Array([${classif}]),`);
     lines.push('};\n');
     net.client.send('export', lines.join('\n'));
   }
@@ -2165,7 +2053,7 @@ export function main() {
     y += button_spacing;
     x = x0 + 25;
     modeButton('view', 'humid', 4);
-    modeButton('view', 'slope', 6);
+    modeButton('view', 'classif', 6);
     modeButton('view', 'biomes', 5);
     y += button_spacing;
     x = x0;
@@ -2184,7 +2072,7 @@ export function main() {
     y += button_spacing;
     x = x0 + 25;
     modeButton('edit', 'ocean', 5);
-    modeButton('edit', 'slope', 10);
+    modeButton('edit', 'classif', 10);
     modeButton('edit', 'output', 6);
     y += button_spacing;
     x = x0;
@@ -2298,12 +2186,9 @@ export function main() {
       slider('threshold', 1, 2000, 0);
       slider('weight', 0, 1, 2);
     } else if (modes.edit === 10) {
-      subopts = opts.slope_vis;
-      slider('mode', 0, 2, 0);
-      slider('scale', 0, 20, 2);
-      slider('cut1', 0, 1, 3);
+      subopts = opts.classif;
+      slider('cut1', -1, 1, 3);
       slider('cut2', 0, 1, 3);
-      slider('steps', 0, 10, 0);
       slider('blur_w', 1, 10, 0);
       slider('blur_scale', 0, 1000, 0);
     }

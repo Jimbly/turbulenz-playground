@@ -1,6 +1,3 @@
-Try generating mountains/hills/plains hint for biome type selection (just in playground for now)
-
-
 Add Uniformish, interesting low-level noise for base sea level elevation on edges (low 25%?) that we can blend to regardless of interior sea level choices
   Have sea level edge and current noise be at ~8k, so it can go super deep later where needed, and there's not as much dynamic to the near-coastal noise
 
