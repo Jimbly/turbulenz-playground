@@ -128,6 +128,8 @@ export function main() {
       tuning_h: 32,
       show_elev: true,
       prune: true,
+      mtify_prune_grace: 100,
+      mtify_prune: true,
     },
     ocean: {
       frequency: 3,
@@ -1343,6 +1345,102 @@ export function main() {
       }
     }
 
+    function pruneFloodedRivers() {
+      for (let ii = 0; ii < total_size; ++ii) {
+        if (!river[ii]) {
+          continue;
+        }
+        let wl = water_level[ii];
+        if (wl && relev[ii] < wl) {
+          river[ii] = 0;
+        }
+      }
+    }
+
+    function pruneUphillRivers() {
+      // After Mountainify has changed the slopes, are any rivers now flowing uphill?
+      subopts = opts.river;
+      if (!subopts.mtify_prune) {
+        return;
+      }
+      let { mtify_prune_grace } = subopts;
+
+      function clearRiver(pos, from_dir) {
+        let bits = river[pos];
+        let neighbors = neighbors_bit[pos & 1];
+        for (let ii = 0; ii < 6; ++ii) {
+          if (ii !== from_dir && (bits & (1 << ii))) {
+            clearRiver(pos + neighbors[ii], (ii + 3) % 6);
+          }
+        }
+        rstrahler[pos] = 0;
+        river[pos] = 0;
+      }
+      function fillStrahler(pos, from_dir) {
+        let my_elev = relev[pos];
+        let bits = river[pos];
+        let out = [];
+        let neighbors = neighbors_bit[pos & 1];
+        for (let ii = 0; ii < 6; ++ii) {
+          if (ii !== from_dir && (bits & (1 << ii))) {
+            let nid = pos + neighbors[ii];
+            if (relev[nid] < my_elev) {
+              if (relev[nid] < my_elev - mtify_prune_grace) {
+                river[pos] &= ~(1 << ii);
+                clearRiver(nid, (ii + 3) % 6);
+              } else {
+                // Pretty close, just raise a bit
+                relev[nid] = my_elev;
+                out.push(ii);
+              }
+            } else {
+              out.push(ii);
+            }
+          }
+        }
+        // Might as well also re-compute Strahler (just for debug)
+        let s;
+        if (!out.length) {
+          s = 1;
+        } else {
+          if (out.length === 1) {
+            s = fillStrahler(pos + neighbors[out[0]], (out[0] + 3) % 6);
+          } else {
+            assert.equal(out.length, 2);
+            let s1 = fillStrahler(pos + neighbors[out[0]], (out[0] + 3) % 6);
+            let s2 = fillStrahler(pos + neighbors[out[1]], (out[1] + 3) % 6);
+            if (s1 === s2) {
+              s = s1 + 1;
+            } else {
+              s = max(s1, s2);
+            }
+          }
+        }
+        rstrahler[pos] = s;
+        return s;
+      }
+
+      for (let ii = 0; ii < total_size; ++ii) {
+        let rbits = river[ii];
+        if (!rbits) {
+          continue;
+        }
+        let neighbors = neighbors_bit[ii & 1];
+        let found_one = false;
+        for (let jj = 0; jj < neighbors.length; ++jj) {
+          if (rbits & (1 << jj)) {
+            let nid = ii + neighbors[jj];
+            if (!river[nid]) {
+              assert(!found_one);
+              found_one = true;
+              fillStrahler(ii, jj);
+              // Also, add a bit to where we flow into, to continue rivers
+              // todo.push([nid, jj]);
+            }
+          }
+        }
+      }
+    }
 
     function generateCoastDF() {
       util.fill(0);
@@ -1550,8 +1648,10 @@ export function main() {
     fixupCoastalWaters();
     blurExtremeSlopes();
     fillLakes();
+    pruneFloodedRivers();
     generateCoastDF(); // includes lakes
     mountainify();
+    pruneUphillRivers();
 
     let total_range = opts.output.land_range; // + opts.output.sea_range; - sea isn't used for slope, for the most part
     let slope_mul = 4096 / total_range;
@@ -2128,6 +2228,10 @@ export function main() {
       slider('tuning_h', 1, 200, 0);
       toggle('show_elev');
       toggle('prune');
+      toggle('mtify_prune');
+      if (subopts.mtify_prune) {
+        slider('mtify_prune_grace', 0, 200, 0);
+      }
     } else if (modes.edit === 4) {
       subopts = opts.humidity;
       slider('frequency', 0.1, 10, 1, true);
