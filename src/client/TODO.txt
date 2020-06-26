@@ -1,9 +1,7 @@
 Try: do not prune rivers if a connected neighbor's strahler is > 1 (then do not need to re-calc, and provides more interesting shapes?)
 
 Try: Add some chance for rivers to start at non-0 elevation so we get waterfalls into the ocean / lakes
-  Or, just some waterfallify process that flattens out choice rivers preceding falling into lakes?
-
-Try: Draw a random river from placed lakes to the ocean, use that to choose base elevation for the lake? How would we fill up to that?
+  Or, just some waterfallify process that flattens out choice rivers (Strahler=1) preceding falling into lakes?
 
 River tuning factor H: we take the highest priority node within H of the lowest elevation candidate
   Low H -> fill lowlands first
@@ -12,8 +10,9 @@ River tuning factor H: we take the highest priority node within H of the lowest 
 For better river basins - we need to adjust the rslope based on the strahler number (and therefore original priority?), and flatten it out at the bottom
   Maybe also adjust tslope coming up from that high-strahler rivers?
 
-Contintent tweaks:
+Continent tweaks:
 https://www.reddit.com/r/proceduralgeneration/comments/gi4hq4/geologically_reasonable_maps_seed_2/fqe9pt0/
 
 Later: Add Uniformish, interesting low-level noise for base sea level elevation on edges (low 25%?) that we can blend to regardless of interior sea level choices
   Have sea level edge and current noise be at 50% of range, so it can go super deep later where needed, and there's not as much dynamic to the near-coastal noise
+Have sea level not fade to deep so absolutely, so we can have a chance of sunken islands (and little islands?) in the middle of the ocean
