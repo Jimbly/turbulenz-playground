@@ -4,7 +4,6 @@ precision lowp float;
 
 uniform sampler2D tex0;
 uniform sampler2D tex1;
-uniform sampler2D tex2;
 
 uniform vec4 hex_param;
 
@@ -71,7 +70,6 @@ void main(void) {
     }
   }
 
-
   // integer hex coordinates
   vec2 texcoords = vec2(ix, iy);
   // texcoords = vec2(floor(interp_texcoord / HEX_HEIGHT));
@@ -79,59 +77,15 @@ void main(void) {
   texcoords = (texcoords + 0.5) / hex_param.x;
 
   vec4 tex = texture2D(tex0, texcoords);
-  vec4 tex_extra = texture2D(tex1, texcoords);
-  vec4 tex_color = texture2D(tex2, texcoords);
-  vec3 color = vec3(1.0, 0.0, 1.0);
+  vec4 tex_color = texture2D(tex1, texcoords);
   float alpha = interp_color.a;
-  int debug = int(tex.y * 255.0 + 0.1);
-  float land = tex.x;
   float mode = hex_param.y;
-  if (mode == 0.0) {
-    // coast
-    color = vec3(land);
-    if (debug > 0) {
-      if (debug == 5) {
-        // coastline
-        color = vec3(0.8, 0.7, 0.3);
-      } else if (debug == 4) {
-        // inland sea
-        color.g = 0.25;
-        color.b = 1.0;
-      } else if (debug == 1) {
-        // border
-        color.r = 1.0;
-        color.b = 0.5;
-      } else if (debug <= 3) {
-        // ocean
-        color.rgb = vec3(0.0, 0.0, 1.0);
-      }
-    }
-  } else if (mode == 1.0) {
-    // terrain slope
-    color = vec3(tex.z);
-    if (land == 0.0) {
-      color = vec3(0.0, 0.0, tex_extra.y);
-    }
-  } else if (mode == 2.0) {
-    // river slope
-    color = vec3(tex.w * 255.0 / hex_param.z);
-    if (land == 0.0) {
-      color = vec3(0.0, 0.0, tex_extra.y);
-    }
-  } else if (mode == 3.0) {
+  vec3 color = tex_color.rgb;
+  if (mode == 3.0) {
     // rivers
-    //color = vec3(tex.w);
-    float relev = tex_extra.y;
-    if (mode == 5.0) {
-      color = tex_color.rgb;
-    } else {
-      color = vec3(relev);
-    }
-
-    //color *= color;
     vec4 bits1;
     vec3 bits2;
-    float bits_source = tex_extra.x * 255.0;
+    float bits_source = tex.x * 255.0;
     bits1.x = bits_source * 0.5 + 0.1;
     bits1.y = floor(bits1.x) * 0.5 + 0.1;
     bits1.z = floor(bits1.y) * 0.5 + 0.1;
@@ -142,7 +96,7 @@ void main(void) {
     bits1 = floor(fract(bits1) * 2.0);
     bits2 = floor(fract(bits2) * vec3(2.0, 2.0, 4.0));
 
-    float strahler = tex_extra.z * 255.0;
+    float strahler = tex.y * 255.0;
 
     fracx = fracx * 0.75 + 0.25;
     float r = 0.0;
@@ -168,22 +122,6 @@ void main(void) {
     if (r > 0.01) {
       color.rgb = vec3(0.0, 0.0, strahler * 48.0);
     }
-    if (land == 0.0) {
-      color = vec3(0.0, 0.0, tex_extra.y);
-    }
-  } else if (mode == 4.0) {
-    if (land == 1.0) {
-      color = tex_extra.www;
-    } else {
-      color = vec3(0.0, 0.0, tex_extra.y);
-    }
-  } else if (mode == 5.0) {
-    color = tex_color.rgb;
-    if (land == 0.0) {
-      color.b = 1.0;
-    }
-  } else if (mode == 6.0) {
-    color = tex_color.rgb;
   }
   if (ix < 0.0 || ix >= hex_param.x || iy < 0.0 || iy >= hex_param.x) {
     alpha = 0.0;

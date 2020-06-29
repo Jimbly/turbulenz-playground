@@ -1,4 +1,6 @@
 const assert = require('assert');
+const { abs } = Math;
+const { randCreate } = require('./glov/rand_alea.js');
 
 const C_WATER = 0;
 const C_PLAINS = 1;
@@ -62,39 +64,7 @@ const choice_elev0_hum25 = weightedChoiceBuild([
   [RARE, HILLS],
 ]);
 
-export function getBiomeV1(is_land, elev, humidity, choice) {
-  if (!is_land) {
-    return OCEAN;
-  } else if (elev > 0.6667) {
-    if (humidity > 0.75) {
-      return TUNDRA;
-    } else {
-      return MOUNTAINS;
-    }
-  } else if (elev > 0.3333) {
-    if (humidity > 0.75) {
-      return MOUNTAINS;
-    } else if (humidity > 0.5) {
-      return HILLS_FOREST;
-    } else if (humidity > 0.25) {
-      return HILLS;
-    } else {
-      return PLAINS;
-    }
-  } else {
-    if (humidity > 0.75) {
-      return weightedChoiceGet(choice_elev0_hum75, choice);
-    } else if (humidity > 0.5) {
-      return weightedChoiceGet(choice_elev0_hum50, choice);
-    } else if (humidity > 0.25) {
-      return weightedChoiceGet(choice_elev0_hum25, choice);
-    } else {
-      return DESERT;
-    }
-  }
-}
-
-export function getBiomeV2(classif, tot_slope, elev, humidity, choice, cdist) {
+function getBiomeV2(classif, tot_slope, elev, humidity, choice, cdist) {
   if (classif === C_WATER) {
     return OCEAN;
   }
@@ -128,5 +98,68 @@ export function getBiomeV2(classif, tot_slope, elev, humidity, choice, cdist) {
     }
   } else {
     return assert(0);
+  }
+}
+
+export function calculateBiomesTest(hex_tex_size, cdata, tex_data_color) {
+  let {
+    elev, humidity, classif, ocean_distance, sea_level, max_elevation,
+  } = cdata;
+  // This is not in output, just simulating what the game will do with this data when it gets it
+  let width = hex_tex_size;
+  let height = width;
+  let stride = width;
+  let neighbors_even = [
+    stride, // above
+    1, // upper right
+    1 - stride, // lower right
+    -stride, // below
+    -1 - stride, // lower left
+    -1, // upper left
+  ];
+  let neighbors_odd = [
+    stride, // above
+    1 + stride, // upper right,
+    1, // lower right
+    -stride, // below
+    -1, // lower left
+    -1 + stride, // upper left,
+  ];
+  let neighbors_bit = [neighbors_even, neighbors_odd];
+
+  let rand = randCreate(0x12345);
+
+  let land_range = max_elevation - sea_level;
+  for (let y = 0; y < height; ++y) {
+    for (let x = 0; x < width; ++x) {
+      let pos = y * width + x;
+      //let is_land = land[pos];
+      let celev = (elev[pos] - sea_level) / land_range;
+      // let has_river = is_land && river[pos];
+      let humid = humidity[pos] / 255;
+      // let slope = tslope[pos]; // Use actual calculated abs(max?) of slope from elev?
+      let cdist = ocean_distance[pos] / (hex_tex_size * 2);
+      let cat = classif[pos];
+      let choice = rand.random();
+
+      // calc actual slope
+      let tot_slope = 0;
+      //let max_slope = 0;
+      let neighbors = neighbors_bit[x & 1];
+      for (let ii = 0; ii < 6; ++ii) {
+        let npos = pos + neighbors[ii];
+        let nelev = (elev[npos] - sea_level) / land_range;
+        let slope = abs(celev - nelev);
+        tot_slope += slope;
+        //max_slope = max(max_slope, slope);
+      }
+
+      let color = getBiomeV2(cat, tot_slope, celev, humid, choice, cdist);
+
+      //let color = getBiomeV1(is_land, celev, humid, choice);
+      for (let jj = 0; jj < 4; ++jj) {
+        tex_data_color[pos * 4 + jj] = color[jj];
+      }
+    }
   }
 }
