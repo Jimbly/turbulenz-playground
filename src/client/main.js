@@ -5,6 +5,8 @@ glov_local_storage.storage_prefix = 'macrogen'; // Before requiring anything els
 const { calculateBiomesTest } = require('./biome_test.js');
 const camera2d = require('./glov/camera2d.js');
 const continent_gen = require('./continent_gen.js');
+const { continentDeserialize, continentSerialize } = require('./continent_serialize.js');
+const { continentSerializeTest } = require('./continent_serialize_test.js');
 const {
   continentGen,
   // D_OPEN,
@@ -72,7 +74,7 @@ export function main() {
 
   let modes = {
     view: 3,
-    edit: 10,
+    edit: 6,
   };
 
   let debug_tex1;
@@ -88,6 +90,8 @@ export function main() {
 
   let tex_data1 = new Uint8Array(tex_total_size * 4);
   let tex_data_color = new Uint8Array(tex_total_size * 4);
+
+  let test_export = true;
 
   let color = vec4(0,0,0,1);
   function updateDebugTexture(cdata) {
@@ -232,20 +236,31 @@ export function main() {
     hex_param[1] = view_mode;
   }
 
+  let serialize_size;
   function doExport(cdata) {
-    let lines = [];
-    let { elev, humidity, river, water_level, classif } = cdata;
-    lines.push('/* eslint max-len:off */');
-    lines.push('window.continent_data = {');
-    lines.push(`  sea_level: ${cdata.sea_level},`);
-    lines.push(`  max_elevation: ${cdata.max_elevation},`);
-    lines.push(`  elev: new Uint16Array([${elev}]),`);
-    lines.push(`  humidity: new Uint8Array([${humidity}]),`);
-    lines.push(`  river: new Uint8Array([${river}]),`);
-    lines.push(`  water_level: new Uint16Array([${water_level}]),`);
-    lines.push(`  classif: new Uint8Array([${classif}]),`);
-    lines.push('};\n');
-    net.client.send('export', lines.join('\n'));
+    if (0) {
+      continentSerializeTest(cdata);
+    } else {
+      let start = Date.now();
+      let ser = continentSerialize(cdata);
+      console.log(`Serialized in ${Date.now() - start}ms`);
+      start = Date.now();
+      serialize_size = ser.length;
+      let deser = continentDeserialize(ser);
+      console.log(`Deserialized in ${Date.now() - start}ms`);
+      let lines = [];
+      lines.push('/* eslint max-len:off */');
+      lines.push('window.continent_data = {');
+      lines.push(`  sea_level: ${deser.sea_level},`);
+      lines.push(`  max_elevation: ${deser.max_elevation},`);
+      lines.push(`  elev: new Uint16Array([${deser.elev}]),`);
+      lines.push(`  humidity: new Uint8Array([${deser.humidity}]),`);
+      lines.push(`  river: new Uint8Array([${deser.river}]),`);
+      lines.push(`  water_level: new Uint16Array([${deser.water_level}]),`);
+      lines.push(`  classif: new Uint8Array([${deser.classif}]),`);
+      lines.push('};\n');
+      net.client.send('export', lines.join('\n'));
+    }
   }
 
   let need_regen = true;
@@ -576,12 +591,16 @@ export function main() {
       subopts.sea_range = 1 << subopts.sea_range_exp;
       subopts.land_range = 1 << subopts.land_range_exp;
 
-      if (ui.buttonText({ x, y, text: 'Export' })) {
+      if (ui.buttonText({ x, y, text: 'Export' }) || test_export) {
+        test_export = false;
         opts.output.debug = false;
         doExport(continentGen(opts));
         opts.output.debug = true;
       }
       y += button_spacing;
+      if (serialize_size) {
+        ui.print(style_labels, x, y, Z.UI, `Size: ${serialize_size}`);
+      }
     } else if (modes.edit === 7) {
       subopts = opts.mountainify;
       slider('peak_radius', 2, 50, 0);

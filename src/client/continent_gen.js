@@ -171,9 +171,9 @@ function setupWorkBuffers(hex_tex_size) {
   tslope = new Uint8Array(total_size);
   rslope = new Uint8Array(total_size);
   river = new Uint8Array(total_size);
-  relev = new Uint32Array(total_size); // donotcheckin: use Uint16Array here?
+  relev = new Uint16Array(total_size);
   rstrahler = new Uint8Array(total_size);
-  water_level = new Uint32Array(total_size); // donotcheckin: use Uint16Array here?
+  water_level = new Uint16Array(total_size);
   coast_distance = new Uint8Array(total_size);
   ocean_distance = new Uint8Array(total_size);
   humidity = new Uint8Array(total_size);
