@@ -2,6 +2,7 @@
 const glov_local_storage = require('./glov/local_storage.js');
 glov_local_storage.storage_prefix = 'macrogen'; // Before requiring anything else that might load from this
 
+const assert = require('assert');
 const { calculateBiomesTest } = require('./biome_test.js');
 const camera2d = require('./glov/camera2d.js');
 const continent_gen = require('./continent_gen.js');
@@ -19,6 +20,7 @@ const {
 } = continent_gen;
 const engine = require('./glov/engine.js');
 const input = require('./glov/input.js');
+const { linkText } = require('./glov/link.js');
 const { min, floor, round, sqrt } = Math;
 const net = require('./glov/net.js');
 const shaders = require('./glov/shaders.js');
@@ -60,6 +62,13 @@ export function main() {
     return;
   }
 
+  assert(window.worldsModAPI);
+  let mapi = window.worldsModAPI({
+    hosts: {
+      debug3000: 'http://localhost:3000/' // donotcheckin
+    },
+  });
+
   let shader_hex = shaders.create('shaders/hex.fp');
 
   // Perfect sizes for pixely modes
@@ -68,6 +77,17 @@ export function main() {
   let style_labels = ui.font.style({
     outline_width: 4.0,
     outline_color: 0x000000ff,
+  });
+
+  let style_link = ui.font.style(null, {
+    color: 0x5040FFff,
+    outline_width: 4.0,
+    outline_color: 0x00000020,
+  });
+  let style_link_hover = ui.font.style(null, {
+    color: 0x0000FFff,
+    outline_width: 4.0,
+    outline_color: 0x00000020,
   });
 
   const createSprite = sprites.create;
@@ -91,7 +111,7 @@ export function main() {
   let tex_data1 = new Uint8Array(tex_total_size * 4);
   let tex_data_color = new Uint8Array(tex_total_size * 4);
 
-  let test_export = true;
+  let test_export = false;
 
   let color = vec4(0,0,0,1);
   function updateDebugTexture(cdata) {
@@ -240,26 +260,31 @@ export function main() {
   function doExport(cdata) {
     if (0) {
       continentSerializeTest(cdata);
-    } else {
+    } else if (0) {
+      // Send to server
       let start = Date.now();
       let ser = continentSerialize(cdata);
       console.log(`Serialized in ${Date.now() - start}ms`);
       start = Date.now();
       serialize_size = ser.length;
-      let deser = continentDeserialize(ser);
+      /*let deser =*/ continentDeserialize(ser);
       console.log(`Deserialized in ${Date.now() - start}ms`);
-      let lines = [];
-      lines.push('/* eslint max-len:off */');
-      lines.push('window.continent_data = {');
-      lines.push(`  sea_level: ${deser.sea_level},`);
-      lines.push(`  max_elevation: ${deser.max_elevation},`);
-      lines.push(`  elev: new Uint16Array([${deser.elev}]),`);
-      lines.push(`  humidity: new Uint8Array([${deser.humidity}]),`);
-      lines.push(`  river: new Uint8Array([${deser.river}]),`);
-      lines.push(`  water_level: new Uint16Array([${deser.water_level}]),`);
-      lines.push(`  classif: new Uint8Array([${deser.classif}]),`);
-      lines.push('};\n');
-      net.client.send('export', lines.join('\n'));
+      let pak = net.client.wsPak('export');
+      pak.writeBuffer(ser);
+      pak.send();
+    } else {
+      // Send to WorldsFRVR via Mod API
+      // Expects the raw (unserialized) data in the form:
+      //   {
+      //     sea_level: 8192,
+      //     max_elevation: 24576,
+      //     elev: new Uint16Array(256*256),
+      //     humidity: new Uint8Array(256*256),
+      //     river: new Uint8Array(256*256),
+      //     water_level: new Uint16Array(256*256),
+      //     classif: new Uint8Array(256*256),
+      //   };
+      mapi.continentDataSet(cdata);
     }
   }
 
@@ -591,15 +616,30 @@ export function main() {
       subopts.sea_range = 1 << subopts.sea_range_exp;
       subopts.land_range = 1 << subopts.land_range_exp;
 
-      if (ui.buttonText({ x, y, text: 'Export' }) || test_export) {
-        test_export = false;
-        opts.output.debug = false;
-        doExport(continentGen(opts));
-        opts.output.debug = true;
-      }
-      y += button_spacing;
-      if (serialize_size) {
-        ui.print(style_labels, x, y, Z.UI, `Size: ${serialize_size}`);
+      if (mapi.connected()) {
+        ui.print(style_labels, x, y, Z.UI, `WorldsModAPI connected to ${mapi.connected()}`);
+        y += ui.font_height + 2;
+        if (ui.buttonText({ x, y, text: 'Export' }) || test_export) {
+          test_export = false;
+          opts.output.debug = false;
+          doExport(continentGen(opts));
+          opts.output.debug = true;
+        }
+        y += button_spacing;
+        if (serialize_size) {
+          ui.print(style_labels, x, y, Z.UI, 'Data exported! Create a New World to use this data.');
+          y += ui.font_height + 2;
+          ui.print(style_labels, x, y, Z.UI, `Size: ${serialize_size}`);
+          y += ui.font_height + 2;
+        }
+      } else {
+        ui.print(style_labels, x, y, Z.UI, 'To export, open Worlds FRVR');
+        y += ui.font_height + 2;
+        linkText({
+          style_link, style_link_hover,
+          x, y,
+          url: 'https://worlds.frvr.com/',
+        });
       }
     } else if (modes.edit === 7) {
       subopts = opts.mountainify;
