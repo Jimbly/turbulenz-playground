@@ -94,7 +94,7 @@ export function main() {
 
   let modes = {
     view: 3,
-    edit: 6,
+    edit: 0,
   };
 
   let debug_tex1;
@@ -499,12 +499,16 @@ export function main() {
     }
     ui.print(style_labels, x, y + 2, Z.UI, 'View:');
     x += 25;
+    let aspect = engine.width / engine.height;
+    let num_rows = aspect > 1.9 ? 1 : 2;
     modeButton('view', 'coast', 0);
     modeButton('view', 'tslope', 1);
     modeButton('view', 'rslope', 2);
     modeButton('view', 'river', 3);
-    y += button_spacing;
-    x = x0 + 25;
+    if (num_rows === 2) {
+      y += button_spacing;
+      x = x0 + 25;
+    }
     modeButton('view', 'humid', 4);
     modeButton('view', 'classif', 6);
     modeButton('view', 'biomes', 5);
@@ -512,18 +516,27 @@ export function main() {
     x = x0;
     ui.print(style_labels, x, y + 2, Z.UI, 'Edit:');
     x += 25;
+    num_rows = aspect > 1.77 ? 2 : 3;
     modeButton('edit', 'coast', 0);
     modeButton('edit', 'tslope', 1);
     modeButton('edit', 'rslope', 2);
     modeButton('edit', 'river', 3);
-    y += button_spacing;
-    x = x0 + 25;
+    if (num_rows === 3) {
+      y += button_spacing;
+      x = x0 + 25;
+    }
     modeButton('edit', 'lakes', 8);
     modeButton('edit', 'blur', 9);
+    if (num_rows === 2) {
+      y += button_spacing;
+      x = x0 + 25;
+    }
     modeButton('edit', 'mtify', 7);
     modeButton('edit', 'humid', 4);
-    y += button_spacing;
-    x = x0 + 25;
+    if (num_rows === 3) {
+      y += button_spacing;
+      x = x0 + 25;
+    }
     modeButton('edit', 'ocean', 5);
     modeButton('edit', 'classif', 10);
     modeButton('edit', 'output', 6);
