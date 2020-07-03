@@ -66,7 +66,10 @@ export function link(param) {
 }
 
 export function linkText(param) {
-  let { style_link, style_link_hover, x, y, z, font_size, text } = param;
+  let { style_link, style_link_hover, x, y, z, font_size, text, url } = param;
+  text = text || url;
+  z = z || Z.UI;
+  font_size = font_size || ui.font_height;
   // Also: any parameter to link(), e.g. url
   let w = ui.font.getStringWidth(style_link, font_size, text);
   let h = font_size;
