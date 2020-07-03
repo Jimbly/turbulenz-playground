@@ -64,9 +64,10 @@ export function main() {
 
   assert(window.worldsModAPI);
   let mapi = window.worldsModAPI({
-    hosts: {
-      debug3000: 'http://localhost:3000/' // donotcheckin
-    },
+    // For testing against local build:
+    // hosts: {
+    //   debug3000: 'http://localhost:3000/'
+    // },
   });
 
   let shader_hex = shaders.create('shaders/hex.fp');
